@@ -1,0 +1,131 @@
+---
+import Layout from '@levino/shipyard-base/layouts/Page.astro'
+import { instanceLabel } from '../../lib/db/instance.js'
+import { verteilerUebersicht } from '../../lib/lists/uebersicht.js'
+import { canSeePersonalData } from '../../server/auth/roles.js'
+
+export const prerender = false
+
+/**
+ * Die Verteiler der Klasse — zur Laufzeit aus der Datenbank.
+ *
+ * Diese Seite ersetzt die Markdown-Dateien, in denen die Adressen einmal von
+ * Hand standen. Der Grund steht in src/lib/lists/uebersicht.ts: dieselbe
+ * Angabe an zwei Orten heisst, dass eine davon veraltet — und genau das war
+ * passiert. Hier steht keine Adresse und keine Domain fest verdrahtet; alles
+ * kommt aus `mailing_lists` und `listDomain()`.
+ *
+ * Sichtbar fuer JEDES Mitglied (Faehigkeit `lesen`): welche Verteiler es gibt
+ * und welche Gruppen sie erreichen, ist die Frage, die man vor dem Absenden
+ * beantwortet haben will. Sie zu beantworten braucht keine fremde Adresse —
+ * deshalb nennt die Seite Gruppen und keine Personen.
+ */
+
+const roles = Astro.locals.user?.roles ?? []
+const verteiler = verteilerUebersicht(canSeePersonalData(roles))
+---
+
+<Layout title="Mailverteiler">
+  <div class="container mx-auto px-4 py-8">
+    <h1 class="text-2xl font-bold mb-2">Mailverteiler — {instanceLabel()}</h1>
+
+    <p class="mb-6">
+      Eine E-Mail an eine dieser Adressen erreicht alle Personen der genannten
+      Gruppen. Wer im Einzelnen dahintersteht, steht hier bewusst nicht — das
+      sind die Adressen anderer Familien.
+    </p>
+
+    {verteiler.length === 0 && (
+      <p class="mb-6">
+        Für diese Klasse ist derzeit kein Verteiler eingerichtet.
+      </p>
+    )}
+
+    {verteiler.map((v) => (
+      <div class="not-prose border rounded-lg p-4 mb-4">
+        <h2 class="text-lg font-bold mb-1">{v.label}</h2>
+        <p class="mb-3">
+          <a class="link link-primary font-mono break-all" href={`mailto:${v.adresse}`}>{v.adresse}</a>
+        </p>
+
+        <dl class="grid grid-cols-[max-content_1fr] gap-x-4 gap-y-1 text-sm">
+          <dt class="font-semibold">Erreicht</dt>
+          <dd>
+            {v.empfaengerGruppen.join(', ') || '—'}
+            {v.weitereUeberUntergruppen.length > 0 && (
+              <span class="opacity-70">
+                {' '}(einschließlich {v.weitereUeberUntergruppen.join(', ')})
+              </span>
+            )}
+          </dd>
+
+          <dt class="font-semibold">Wer darf schreiben</dt>
+          <dd>
+            {v.schreibrecht.kind === 'offen' ? (
+              <>Jede Absenderadresse darf an diesen Verteiler schreiben — auch
+              von außerhalb der Schule.</>
+            ) : (
+              <>
+                {[
+                  ...v.schreibrecht.gruppen,
+                  ...(v.schreibrecht.auchEmpfaenger ? ['alle Empfänger'] : []),
+                  ...v.schreibrecht.muster,
+                  ...v.schreibrecht.adressen,
+                ].join(', ') || 'Niemand — der Verteiler nimmt derzeit keine Post an.'}
+                {v.schreibrecht.verborgeneAdressen > 0 && (
+                  <span class="opacity-70">
+                    {' '}und {v.schreibrecht.verborgeneAdressen} weitere
+                    Einzeladresse{v.schreibrecht.verborgeneAdressen === 1 ? '' : 'n'}
+                  </span>
+                )}
+              </>
+            )}
+          </dd>
+
+          <dt class="font-semibold">Antwort geht an</dt>
+          <dd>
+            {v.antwortAn === 'list'
+              ? 'den Verteiler — „Antworten" schreibt an alle.'
+              : 'den Absender — „Antworten" schreibt nur an eine Person, „Allen antworten" an den Verteiler.'}
+          </dd>
+
+          {v.betreffPraefix && (
+            <>
+              <dt class="font-semibold">Betreff</dt>
+              <dd>beginnt mit <code>{v.betreffPraefix}</code></dd>
+            </>
+          )}
+        </dl>
+      </div>
+    ))}
+
+    <h2 class="text-xl font-bold mt-8 mb-3">So antwortest Du richtig</h2>
+    <p class="mb-3">
+      Ob „Antworten" an den Absender oder an alle geht, ist je Verteiler
+      eingestellt und steht oben bei jedem einzelnen. Verlasse Dich nicht auf
+      Gewohnheit, sondern auf die Zeile „Antwort geht an" — und wirf vor dem
+      Senden einen Blick ins „An"-Feld. Im Zweifel lieber zu wenige Empfänger
+      als zu viele: nachschicken kann man immer.
+    </p>
+    <p class="mb-3">
+      Wer <em>zusätzlich</em> zu allen noch eine bestimmte Person erreichen
+      will, trägt deren Adresse von Hand ein. Wer nur als Absender für einen
+      Verteiler freigeschaltet ist, steht dadurch nicht automatisch auch unter
+      seinen Empfängern und bekommt eine Antwort an den Verteiler also nicht
+      mit.
+    </p>
+    <p class="mb-3">
+      Anhänge sind möglich, sollten aber klein bleiben — die Nachricht geht an
+      viele Postfächer auf einmal.
+    </p>
+
+    <h2 class="text-xl font-bold mt-8 mb-3">Keine Post mehr von einem Verteiler?</h2>
+    <p class="mb-6">
+      Es gibt keine Selbstverwaltung mit eigenem Passwort mehr. Wer von einem
+      Verteiler abgemeldet werden möchte, wendet sich an die
+      Klassenelternvertretung; sie trägt den Wunsch ein. Wer einen Zugang mit
+      der Rolle <code>admin</code> hat, findet die Verteiler unter
+      <a class="link link-primary" href="/verwaltung">Verwaltung</a>.
+    </p>
+  </div>
+</Layout>

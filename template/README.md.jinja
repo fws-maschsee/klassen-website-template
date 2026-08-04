@@ -140,16 +140,29 @@ Einmal antippen genügt - die Kalender-App fragt dann nach.
 
 ## Mailverteiler
 
-Die Klasse betreibt ihre Verteiler selbst. Eine Liste `eltern` ist unter
+Die Klasse betreibt ihre Verteiler selbst. Welche es gibt, steht auf der Seite
+**Mailverteiler** unter
+[{{ site_domain }}/verteiler](https://{{ site_domain }}/verteiler) - sichtbar
+für jedes angemeldete Mitglied. Sie zeigt je Verteiler die vollständige
+Adresse, welche **Gruppen** er erreicht, wer schreiben darf und ob „Antworten"
+an den Verteiler oder an den Absender geht.
 
-```
-eltern@{{ repo_name }}.{{ list_base_domain }}
-```
+Wichtig: Diese Seite wird **zur Laufzeit aus der Datenbank** erzeugt. Es steht
+dort keine Adresse von Hand im Text - sie setzt sich aus dem Namen des
+Verteilers und der Listen-Domain der Klasse zusammen. Das ist Absicht und die
+Lehre aus einem echten Fehler: Vorher standen die Adressen als Text in den
+Unterlagen, die Anwendung stellte längst woanders zu, und wer auf die
+angegebene Adresse antwortete, schrieb ins Leere. Eine Angabe, die an zwei
+Orten steht, veraltet an einem davon.
 
-erreichbar; eine Mail dorthin geht an alle Familien, die in der zugehörigen
-Gruppe stehen. Welche Listen es gibt, wer sie erreicht und wer an sie schreiben
-darf, steht in der **Verwaltung** unter
-[{{ site_domain }}/verwaltung](https://{{ site_domain }}/verwaltung).
+**Deshalb steht hier in dieser README ebenfalls keine Verteiler-Adresse.** Wer
+eine sucht, schaut unter `/verteiler` nach. Ein Test in `tests/lists/` wacht
+darüber, dass keine wieder in eine Seite oder einen Unterlagen-Text
+zurückwandert.
+
+Wer im Einzelnen auf einer Liste steht, zeigt die Seite bewusst **nicht** - das
+sind die Adressen anderer Familien. Sie nennt Gruppen, keine Personen, und auch
+keine Anzahl.
 
 ### Wer an einen Verteiler schreiben darf
 

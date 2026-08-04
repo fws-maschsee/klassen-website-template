@@ -120,6 +120,6 @@ nachsehen, wie es wirklich läuft:
 - [`fws-maschsee/server-config`](https://github.com/fws-maschsee/server-config)
   - das GitOps-Repository, in das `deploy/` kopiert wird
 
-Die zehn Fallen, die die Vorlage abfängt, stehen mit Begründung in der
+Die elf Fallen, die die Vorlage abfängt, stehen mit Begründung in der
 [README](README.md). Wer eine davon "aufräumt", baut einen Ausfall nach, den es
 schon einmal gab.

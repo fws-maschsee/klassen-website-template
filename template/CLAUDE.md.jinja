@@ -107,6 +107,7 @@ src/content/docs/        Unterlagen        → Route /docs
 src/content/blog/        Berichte          → Route /blog
 src/content/blog/images/ Bilder für Berichte (werden von Astro optimiert)
 src/pages/               eigene Seiten (Startseite, Verwaltung, Auth, OAuth)
+src/pages/verteiler/     Verteiler-Uebersicht, zur Laufzeit aus der Datenbank
 src/pages/verwaltung/    Adressbuch, Gruppen, Verteiler - nur Rolle `admin`
 src/server/auth/         Anmeldung, Rollen, ZITADEL-Grants. Die EINZIGE Stelle,
                          an der aus einem Token-Claim eine Erlaubnis wird
@@ -114,7 +115,8 @@ src/server/mcp/          MCP-Server und seine Werkzeuge
 src/server/oauth/        OAuth-2.1-Server für den MCP-Endpunkt
 src/lib/db/              Datenzugriff (better-sqlite3)
 src/lib/email/           Rundmail-Versand über SES
-src/lib/lists/           Mailinglisten: Eingang, Weiterverteilung, Signatur
+src/lib/lists/           Mailinglisten: Eingang, Weiterverteilung, Signatur,
+                         Uebersicht fuer /verteiler
 db/migrations/           dbmate-Migrationen (forward-only)
 emails/                  Rundmail-Inhalte, ein Slug je Datei
 email-worker/            Cloudflare-Email-Worker (eigenes npm-Projekt)
@@ -193,9 +195,28 @@ die App weist Post einer fremden Klasse ab.
 ## Mailinglisten
 
 Der Cloudflare-Worker in `email-worker/` nimmt Mail an
-`<liste>@{{ repo_name }}.{{ list_base_domain }}` entgegen, prüft die
-Empfängeradresse und reicht die Rohmail signiert an `/api/lists/incoming`
-weiter. Die Fachlogik liegt vollständig in der App.
+`<liste>@<klasse>.<LIST_DOMAIN>` entgegen, prüft die Empfängeradresse und
+reicht die Rohmail signiert an `/api/lists/incoming` weiter. Die Fachlogik
+liegt vollständig in der App.
+
+Welche Verteiler es gibt, zeigt `/verteiler` — **zur Laufzeit aus der
+Datenbank**, für jedes Mitglied sichtbar (`src/lib/lists/uebersicht.ts`). Dort
+steht keine Adresse fest verdrahtet: Sie entsteht aus dem Localpart der Liste
+und `listDomain()`. Das ist die Lehre aus einem echten Vorfall — die Adressen
+standen als Text in den Unterlagen, die App stellte längst woanders zu, und wer
+antwortete, schrieb ins Leere.
+
+`tests/lists/uebersicht.test.ts` bewacht genau das: Es durchsucht alle
+`.astro`/`.md`/`.mdx` unter `src/` nach Verteiler-Adressen als Literal und
+schlägt fehl, sobald eine auftaucht. **Diesen Test nicht abschwächen.** In
+einer aus der Vorlage erzeugten Klasse wiegt er doppelt: Eine einmal
+hineingeschriebene Adresse würde sonst jede weitere Klasse mit erben.
+
+Die Übersicht nennt Gruppen, keine Personen und keine Anzahl — aus „3 Personen"
+lässt sich in einer Klasse schnell erraten, wer gemeint ist. Domain-Muster
+(`*@schule.example`) sieht jeder; einzelne freigeschaltete Adressen nur, wer
+die Fähigkeit `personen` hat. Statt sie stillschweigend wegzulassen, steht dort
+dann „und N weitere Einzeladressen" — die Lücke bleibt sichtbar.
 
 **Der Worker wird NIEMALS von Hand ausgerollt.** Kein `wrangler deploy`, kein
 `wrangler versions upload`, kein `wrangler secret put`. Ausgerollt wird

@@ -119,7 +119,7 @@ die Klasse die Entscheidung bewusst trifft.
 
 ## Die Fallen, die die Vorlage verhindert
 
-Alle zehn sind beim Aufbau und Betrieb der beiden Referenz-Instanzen wirklich
+Alle elf sind beim Aufbau und Betrieb der beiden Referenz-Instanzen wirklich
 passiert. Eine Vorlage, die sie nicht verhindert, wäre wertlos.
 
 ### 1. Shipyard-Versionen sind gepinnt
@@ -226,7 +226,21 @@ nicht erst hoch. Ohne diese Sperre wäre ein falsch gemountetes Volume ein
 Versand von Elternpost in die falsche Klasse - ein Datenschutzvorfall, kein
 Betriebsfehler.
 
-### 10. Keine echten Personendaten, nirgends
+### 10. Adressen von Verteilern stehen nie im Text
+
+In einer der Referenzklassen standen die Verteiler-Adressen von Hand in den
+Unterlagen. Die Anwendung stellte längst unter anderen Adressen zu; wer auf die
+angegebene antwortete, schrieb ins Leere - monatelang, ohne dass es jemandem
+auffiel. Eine Angabe, die an zwei Orten steht, veraltet an einem davon.
+
+Die Vorlage liefert deshalb `/verteiler`: eine Übersicht, die zur Laufzeit aus
+`mailing_lists` entsteht, mit der Adresse aus Localpart und `listDomain()`.
+Dazu einen Test, der alle `.astro`/`.md`/`.mdx` unter `src/` nach
+Verteiler-Adressen als Literal durchsucht und fehlschlägt, sobald eine
+auftaucht. Für eine Vorlage ist dieser Test besonders wertvoll: Eine einmal
+hineingeschriebene Adresse würde jede erzeugte Klasse mit erben.
+
+### 11. Keine echten Personendaten, nirgends
 
 Diese Vorlage ist ein **öffentliches** Repository. In `src/content/`, in
 Beispieldaten, in Migrationen und in Test-Fixtures stehen ausschließlich

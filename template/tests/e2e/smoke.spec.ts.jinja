@@ -24,6 +24,16 @@ test.describe('Smoke-Tests', () => {
 		await expect(page.locator('h1')).toContainText('Abmelden')
 	})
 
+	// Die Verteiler-Uebersicht kommt zur Laufzeit aus der Datenbank. Eine frisch
+	// erzeugte Klasse hat noch keinen einzigen Verteiler — die Seite muss also
+	// auch dann sauber rendern und nicht erst, wenn Daten da sind.
+	test('Verteiler-Seite laedt, auch ohne einen einzigen Verteiler', async ({
+		page,
+	}) => {
+		await page.goto('/verteiler')
+		await expect(page.locator('h1')).toContainText('Mailverteiler')
+	})
+
 	test('Unterlagen laden', async ({ page }) => {
 		await page.goto('/docs')
 		await expect(page.locator('h1')).toContainText('Startseite')
