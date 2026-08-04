@@ -18,7 +18,9 @@ export default defineConfig({
 		},
 	],
 	webServer: {
-		command: 'npm run build && npm run preview',
+		// `mkdir -p data`: das Verzeichnis steht in .gitignore und existiert im
+		// frischen CI-Checkout nicht. Weder dbmate noch der Server legen es an.
+		command: 'mkdir -p data && npm run build && npm run preview',
 		url: 'http://localhost:4321',
 		reuseExistingServer: true,
 		timeout: 180000,
