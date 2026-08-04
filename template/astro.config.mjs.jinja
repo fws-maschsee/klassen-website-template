@@ -30,9 +30,20 @@ export default defineConfig({
 	// Build würde alle Berichte und Protokolle als öffentliche HTML-Dateien
 	// ausliefern.
 	output: 'server',
+	// `middleware` statt `standalone`: Der Astro-Server läuft nicht allein,
+	// sondern wird von `server.ts` in Express eingehängt. Nur so lassen sich der
+	// MCP-Endpunkt und die OAuth-Routen daneben betreiben (siehe server.ts).
+	// Gestartet wird die Anwendung dadurch mit `npm start`, nicht mit
+	// `node dist/server/entry.mjs`.
 	adapter: node({
-		mode: 'standalone',
+		mode: 'middleware',
 	}),
+	// Astro blockt Same-Origin-POSTs standardmäßig über einen Origin-Check. Da
+	// Express vor Astro sitzt, greift der Check bei der Consent-Seite nicht
+	// zuverlässig. Eigene Verteidigung: `pending_id` ist ein nicht erratbares
+	// Zufallstoken, und der OAuth-Flow ist ohnehin durch PKCE plus die Prüfung
+	// der redirect_uri abgesichert.
+	security: { checkOrigin: false },
 	markdown: {
 		// Admonitions im Docusaurus-Stil (:::note, :::tip, :::info, :::warning,
 		// :::danger). Die Reihenfolge ist bindend: remarkAdmonitionLabels muss
@@ -51,6 +62,7 @@ export default defineConfig({
 				unterlagen: { label: 'Unterlagen', href: '/docs' },
 				berichte: { label: 'Berichte', href: '/blog' },
 				github: { label: 'GitHub', href: REPO_URL },
+				verwaltung: { label: 'Verwaltung', href: '/verwaltung' },
 				logout: { label: 'Abmelden', href: '/logout' },
 			},
 {% if plausible_script_url %}

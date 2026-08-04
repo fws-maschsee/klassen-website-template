@@ -1,4 +1,13 @@
-name: Test
+name: Tests
+
+# Typprüfung und Unit-Tests der App. Bewusst getrennt von `authz.yml`: Jener
+# Lauf fährt ein echtes ZITADEL in Containern hoch und braucht Minuten; dieser
+# hier beantwortet in Sekunden die Frage, ob der Stand überhaupt übersetzt und
+# ob die Regeln um Adressbuch, Verteiler und Versand noch stimmen.
+#
+# Er ruft nichts an, was nicht in diesem Lauf läuft. Die Tests arbeiten gegen
+# eine SQLite-Datei im Arbeitsverzeichnis; ein Zugang zu irgendeinem Dienst
+# kommt hier nicht vor, und `secrets` taucht deshalb nirgends auf.
 
 on:
   push:
@@ -6,12 +15,15 @@ on:
   pull_request:
     branches: [main]
 
+permissions:
+  contents: read
+
 concurrency:
-  group: test-${{ github.ref }}
+  group: tests-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  build:
+  test:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -22,34 +34,12 @@ jobs:
           node-version: '22'
           cache: 'npm'
 
-      # `npm ci`, nicht `npm install`: Die Lockfile entscheidet. Bricht dieser
-      # Schritt mit "lock file out of sync" ab, wurde package.json geändert,
-      # ohne danach `npm install` laufen zu lassen und die Lockfile
-      # mitzucommitten.
+      # `npm ci`, nicht `npm install`: Das Lockfile entscheidet, sonst prüft
+      # dieser Lauf andere Versionen als der Build im Dockerfile.
       - run: npm ci
 
-      - run: npm run build
+      - name: Typecheck
+        run: npm run typecheck
 
-  e2e:
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@v5
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-          cache: 'npm'
-
-      - run: npm ci
-
-      - run: npx playwright install --with-deps chromium
-
-      - run: npm test
-
-      - uses: actions/upload-artifact@v4
-        if: failure()
-        with:
-          name: playwright-report
-          path: playwright-report/
-          retention-days: 7
+      - name: Unit-Tests
+        run: npm test

@@ -16,21 +16,45 @@ Erzeugt aus
 
 Stack:
 
-- **Astro 5** im SSR-Modus (`output: 'server'`) über `@astrojs/node`
-  (`mode: 'standalone'`)
+- **Astro 5** im SSR-Modus (`output: 'server'`) über `@astrojs/node` im Modus
+  `middleware` - der Astro-Server wird von `server.ts` in Express eingehängt,
+  gestartet wird mit `npm start`, nicht mit `node dist/server/entry.mjs`
 - **Shipyard** als Baukasten: `@levino/shipyard-base`, `-docs`, `-blog`
 - **Tailwind 3 + daisyUI 4**
-- **Auth** über `@levino/pocketbase-auth` gegen {{ auth_pocketbase_url }}
+- **Anmeldung** über OpenID Connect gegen das zentrale ZITADEL der Schule
+  ({{ oidc_issuer }}), Projekt dieser Klasse: `{{ repo_name }}`
+- **SQLite** (better-sqlite3) auf einem persistenten Volume unter `/data`,
+  Schema über dbmate-Migrationen in `db/migrations/`
+- **MCP-Server** unter `/mcp` mit eigenem OAuth-2.1-Server (Dynamic Client
+  Registration) - damit lässt sich das Adressbuch im Gespräch pflegen
+- **Mailinglisten**: ein Cloudflare-Email-Worker (`email-worker/`) nimmt die
+  Post an, die App verteilt sie über Amazon SES weiter
 - Inhalte als Markdown unter `src/content/docs` und `src/content/blog`
 - Docker-Image, Deployment auf k3s über Argo CD
 
 SSR und nicht statisch, weil die Middleware jede Anfrage sehen muss. Ein
 statischer Build würde alle Protokolle als öffentliche HTML-Dateien ausliefern.
 
+## Was hier an Daten liegt
+
+Die SQLite-Datei unter `/data` enthält **Namen und E-Mail-Adressen von Eltern**,
+das Versandjournal und die erteilten MCP-Autorisierungen. Sie gehört weder ins
+Image noch ins Repository. Ein Backup ist ein `kubectl cp` der Datei - und
+dieses Backup gehört ebenfalls nirgendwohin, wo es jemand versehentlich
+commitet.
+
+Gespeichert werden bewusst **nur Vorname, Nachname und E-Mail-Adresse**. Keine
+Anrede, keine Telefonnummer, keine Freitext-Notizen. Wer ein Feld braucht,
+ergänzt es mit einer eigenen Migration und begründet es dort - eine Vorlage soll
+niemandem Felder aufdrängen, die er nicht erhoben haben will.
+
+Auch Test-Fixtures benutzen ausschließlich erfundene Namen und
+`example.org`-Adressen.
+
 ## Ein Ort für alle Bezeichnungen
 
 `src/site.config.ts` ist die einzige Stelle, an der Klassenname, Domain,
-Repo-URL, Auth-Gruppe und Kalenderpfad stehen. `astro.config.mjs`,
+Repo-URL, Auth-Rolle und Kalenderpfad stehen. `astro.config.mjs`,
 `src/middleware.ts` und die Seiten unter `src/pages/` importieren von dort.
 
 **Beim Wechsel der Klassenlehrkraft wird `CLASS_NAME` geändert - und sonst
@@ -42,7 +66,7 @@ mitwandert. Kurzfassung:
 | `CLASS_NAME` | jederzeit | reiner Anzeigename |
 | `SCHOOL_NAME` | jederzeit | reiner Anzeigename |
 | `SITE_DOMAIN` | nur mit DNS + Zertifikat + Ingress | Lesezeichen, Kalender-Abos, TLS |
-| `AUTH_GROUP` | nur zusammen mit PocketBase | einseitig geändert = alle Eltern ausgesperrt |
+| `AUTH_ROLE` | nur zusammen mit ZITADEL | einseitig geändert = alle Eltern ausgesperrt |
 | `CALENDAR_PATH` | nie | bestehende `webcal://`-Abos zeigen darauf |
 
 Markdown unter `src/content/` kann nichts importieren. Der ausgeschriebene
@@ -64,15 +88,27 @@ src/content.config.ts    Content Collections (docs, blog)
 src/content/docs/        Unterlagen        → Route /docs
 src/content/blog/        Berichte          → Route /blog
 src/content/blog/images/ Bilder für Berichte (werden von Astro optimiert)
-src/pages/               eigene Seiten (Startseite, Abmelden)
+src/pages/               eigene Seiten (Startseite, Verwaltung, Auth, OAuth)
+src/pages/verwaltung/    Adressbuch, Gruppen, Verteiler - nur Rolle `admin`
+src/server/auth/         Anmeldung, Rollen, ZITADEL-Grants. Die EINZIGE Stelle,
+                         an der aus einem Token-Claim eine Erlaubnis wird
+src/server/mcp/          MCP-Server und seine Werkzeuge
+src/server/oauth/        OAuth-2.1-Server für den MCP-Endpunkt
+src/lib/db/              Datenzugriff (better-sqlite3)
+src/lib/email/           Rundmail-Versand über SES
+src/lib/lists/           Mailinglisten: Eingang, Weiterverteilung, Signatur
+db/migrations/           dbmate-Migrationen (forward-only)
+emails/                  Rundmail-Inhalte, ein Slug je Datei
+email-worker/            Cloudflare-Email-Worker (eigenes npm-Projekt)
+server.ts                Express + Astro + MCP + Queue-Worker in einem Prozess
 public/                  statische Dateien; URL = Pfad ohne public/
 public/public/           der Klassenkalender - der doppelte Pfad ist Absicht
 public/dokumente/        PDFs
 public/img/              Bilder für Unterlagen
 plugins/                 remark-admonition-labels.mjs
-deploy/                  Kubernetes-Manifeste (gehören ins GitOps-Repo)
+deploy/overlays/production/  Kubernetes-Manifeste dieser Klasse
 astro.config.mjs         Astro/Shipyard, importiert site.config.ts
-Dockerfile               zweistufiger Build (Astro SSR mit Node-Adapter)
+Dockerfile               dreistufiger Build (builder, prod-deps, runner)
 ```
 
 `public/public/` ist kein Tippfehler: Die Datei muss unter der URL `/public/…`
@@ -85,10 +121,28 @@ ausnimmt.
 npm ci                  # nicht npm install - siehe unten
 npm run dev             # http://localhost:4321
 npm run build
-npm test                # Playwright, baut vorher selbst
+npm test                # Unit-Tests (vitest)
+npm run test:e2e        # Playwright, baut vorher selbst
 npm run typecheck
 npx @biomejs/biome ci   # Formatierung und Linting
+npm run db:migrate      # Schema anlegen/aktualisieren (dbmate)
 ```
+
+Die Autorisierungs-Tests haben einen eigenen Lauf. Sie fahren ein **echtes,
+wegwerfbares ZITADEL** in Containern hoch und prüfen dagegen, wer diese Seite
+und ihren MCP-Endpunkt sehen und ändern darf:
+
+```bash
+npm run authz:up        # PostgreSQL + ZITADEL + App hochfahren
+npm run test:e2e:authz
+npm run authz:down
+```
+
+Zwei Regeln gelten dabei ohne Ausnahme: **Kein Test ruft einen Dienst auf, der
+nicht im selben Lauf läuft** - weder die Produktivinstanz noch das zentrale
+ZITADEL. Und **kein Mock**: Ein nachgebautes ZITADEL prüft nur den Nachbau,
+genau die Fehler, gegen die diese Tests stehen (Rollen im Token veralten, ein
+Entzug wirkt nie), würde es nicht zeigen.
 
 Das Produktions-Image lokal ausprobieren:
 
@@ -97,13 +151,55 @@ docker compose up --build   # http://localhost:3000, antwortet mit 401
 ```
 
 Die 401 ist das richtige Ergebnis: Sie beweist, dass der SSR-Server läuft und
-die Auth-Middleware greift.
+die Auth-Middleware greift. Ohne `OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET` und
+`SESSION_SECRET` antwortet die App auf geschützten Pfaden mit **503** statt
+ungeschützt auszuliefern - auch das ist Absicht. Der Klassenkalender unter
+`/public/` bleibt in beiden Fällen erreichbar.
+
+## Instanz-Identität: ein Deployment pro Klasse
+
+Es gibt genau **eine** Instanz pro Klasse mit einer eigenen Datenbankdatei. Wer
+versehentlich mit der falschen Datei arbeitet, verschickt Elternpost der einen
+Klasse an die Eltern der anderen. Dagegen stehen zwei Quellen, die
+zusammenpassen müssen:
+
+- `MCP_INSTANCE_NAME` - was das **Deployment** zu sein glaubt (`{{ repo_name }}`)
+- `app_meta.instance` - was in der **Datei** steht; wird beim ersten Start
+  einmalig geschrieben und danach nie mehr verändert
+
+Weichen beide voneinander ab, fährt der Server gar nicht erst hoch. Derselbe
+Wert muss außerdem mit `CLASS_SLUG` in `email-worker/wrangler.toml`
+übereinstimmen, denn der Worker schickt die Klasse als `X-List-Class` mit und
+die App weist Post einer fremden Klasse ab.
+
+## Mailinglisten
+
+Der Cloudflare-Worker in `email-worker/` nimmt Mail an
+`<liste>@{{ repo_name }}.{{ list_base_domain }}` entgegen, prüft die
+Empfängeradresse und reicht die Rohmail signiert an `/api/lists/incoming`
+weiter. Die Fachlogik liegt vollständig in der App.
+
+**Der Worker wird NIEMALS von Hand ausgerollt.** Kein `wrangler deploy`, kein
+`wrangler versions upload`, kein `wrangler secret put`. Ausgerollt wird
+ausschließlich über die GitHub-Integration von Cloudflare aus `main`; ein
+Upload von Hand hat schon einmal den Maileingang blockiert. Das geteilte
+Secret `LIST_WEBHOOK_SECRET` wird nach einem Build im Cloudflare-Dashboard
+eingetragen.
+
+Wer an eine Liste schreiben darf, entscheidet `poster_policy`:
+
+- `offen` (Vorgabe) - **jede** Absenderadresse im Internet.
+- `eingeschraenkt` - nur `poster_groups` oder ein Treffer in
+  `sender_patterns` (`anna@example.org` oder `*@schule.example`; der Stern
+  ersetzt nur den lokalen Teil und trifft keine Subdomains).
+
+Autorisiert wird immer der **Envelope-Absender**, nie der `From:`-Header: Nur
+der Envelope läuft gegen SPF, der Header ist freier Text.
 
 ## Fallen, die schon einmal zugeschnappt sind
 
 Diese vier Punkte sind der Grund, warum die Vorlage existiert. Sie sind alle
-real passiert und haben Zeit gekostet. Die vollständige Liste mit drei
-weiteren Punkten steht in der
+real passiert und haben Zeit gekostet. Die vollständige Liste steht in der
 [README der Vorlage](https://github.com/fws-maschsee/klassen-website-template#die-fallen-die-die-vorlage-verhindert).
 
 ### 1. Shipyard-Versionen sind gepinnt
@@ -159,14 +255,20 @@ Auth-Middleware antwortet mit 401, und das ist die gesunde Produktionsantwort.
 ## Deployment
 
 Push auf `main` → Deploy-Workflow baut das Image auf einem **nativen**
-{{ target_arch }}-Runner (nie QEMU), prüft es, pusht es nach
-`ghcr.io/{{ github_org }}/{{ repo_name }}` und nennt in der
-Lauf-Zusammenfassung den Tag.
+{{ target_arch }}-Runner (nie QEMU), startet es unter Cluster-Bedingungen zur
+Probe, pusht es nach `ghcr.io/{{ github_org }}/{{ repo_name }}`, pinnt
+`deploy/overlays/production/kustomization.yaml` auf den unveränderlichen
+`:<sha>`-Tag und veröffentlicht das Ergebnis force-gepusht auf den Branch
+`production`.
 
-Dieser Tag wird von Hand in `apps/{{ repo_name }}/kustomization.yaml` im
-GitOps-Repository [{{ gitops_repo }}](https://github.com/{{ gitops_repo }})
-eingetragen. Argo CD rollt aus. Details und die einmalige Einrichtung stehen in
-[`deploy/README.md`](deploy/README.md).
+Argo CD verfolgt genau diesen Branch (die `Application` liegt in
+[{{ gitops_repo }}](https://github.com/{{ gitops_repo }})) und rollt aus. Die CI
+bekommt dafür **keinerlei** Cluster-Zugriff: kein kubectl, kein KUBECONFIG,
+kein id-token.
+
+`production` wird bei jedem Deploy überschrieben und trägt "Baum von `main` +
+gepinnter Image-Tag". **Menschen fassen ihn nie an.** Details und die einmalige
+Einrichtung stehen in [`deploy/README.md`](deploy/README.md).
 
 Das GHCR-Paket ist **privat** und muss privat bleiben: `astro build` kompiliert
 `src/content/` in das Image, ein öffentliches Paket würde genau das

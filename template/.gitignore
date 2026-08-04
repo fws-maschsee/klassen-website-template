@@ -18,3 +18,26 @@ yarn-error.log*
 /playwright-report/
 /blob-report/
 /playwright/.cache/
+
+# SQLite-Datenbank mit den Adressbuch-Daten.
+# DATENSCHUTZ: Namen und E-Mail-Adressen der Eltern duerfen NIEMALS ins Repo.
+data/
+*.db
+*.db-shm
+*.db-wal
+db/schema.sql
+
+# dbmate liest .env
+.env
+
+# Die Vorlage ohne Geheimnisse gehoert ins Repo (die Regel `.env.*` weiter oben
+# wuerde sie sonst mit ausschliessen). Das Sternchen am Ende deckt zusaetzlich
+# `.env.example.jinja` ab — im Copier-Template heisst die Datei so, und diese
+# Regel gilt dort ebenfalls, weil sie unter template/ liegt.
+!.env.example*
+
+# Laufzeitzustand des Autorisierungs-Testlaufs: das PAT der Wegwerf-Instanz von
+# ZITADEL, die erzeugten OIDC-Zugangsdaten und das Protokoll der Anwendung.
+# Alles gilt nur fuer genau einen Lauf, und Zugangsdaten gehoeren auch dann
+# nicht ins Repository, wenn sie wertlos sind.
+tests/e2e/authz/.stack/

@@ -1,0 +1,57 @@
+import { expect, test } from '@playwright/test'
+
+/**
+ * Smoke-Tests der frisch erzeugten Klassenseite.
+ *
+ * Sie laufen gegen einen Server mit `DISABLE_AUTH=true` (siehe
+ * `playwright.config.ts`) und pruefen deshalb Inhalte, nicht die Anmeldung.
+ * Wer die Anmeldung selbst pruefen will, nimmt `npm run test:e2e:authz` — die
+ * Tests dort fahren ein echtes ZITADEL hoch.
+ *
+ * Diese Datei kommt aus der Vorlage und beschreibt den AUSLIEFERUNGSZUSTAND.
+ * Sobald die Klasse eigene Berichte schreibt, gehoert sie angepasst — sie ist
+ * dann eine Zusicherung ueber die eigenen Inhalte, nicht mehr ueber die
+ * Vorlage.
+ */
+test.describe('Smoke-Tests', () => {
+	test('Startseite laedt', async ({ page }) => {
+		await page.goto('/')
+		await expect(page.locator('h1')).toContainText('Willkommen')
+	})
+
+	test('Abmelde-Seite laedt', async ({ page }) => {
+		await page.goto('/logout')
+		await expect(page.locator('h1')).toContainText('Abmelden')
+	})
+
+	test('Unterlagen laden', async ({ page }) => {
+		await page.goto('/docs')
+		await expect(page.locator('h1')).toContainText('Startseite')
+	})
+
+	test('Putzplan ist erreichbar', async ({ page }) => {
+		await page.goto('/docs/putzen/putzplan')
+		await expect(page.locator('h1')).toContainText('Putzplan')
+	})
+
+	test('Berichte listen den Willkommens-Beitrag', async ({ page }) => {
+		await page.goto('/blog')
+		await expect(page.locator('h1')).toContainText('Berichte')
+		await expect(page.getByTestId('blog-post-item')).toHaveCount(1)
+	})
+
+	test('Der Willkommens-Beitrag rendert', async ({ page }) => {
+		await page.goto('/blog/{{ first_post_date }}-website-eingerichtet')
+		await expect(page.locator('h1')).toContainText('Website eingerichtet')
+	})
+
+	/**
+	 * Der Klassenkalender MUSS ohne Anmeldung erreichbar sein: Kalender-Apps
+	 * schicken kein Cookie mit. Wird dieser Pfad geschuetzt, hoeren saemtliche
+	 * Abos der Eltern STILL auf zu aktualisieren.
+	 */
+	test('Der Kalender ist ohne Anmeldung erreichbar', async ({ request }) => {
+		const response = await request.get('/public/{{ calendar_filename }}')
+		expect(response.status()).toBe(200)
+	})
+})

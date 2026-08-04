@@ -1,0 +1,42 @@
+name: Email Worker
+
+# Nur Prüfung, kein Deployment. Deployt wird über Cloudflare Workers Builds
+# (Push auf main, Root `email-worker`), siehe email-worker/README.md.
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'email-worker/**'
+      - '.github/workflows/email-worker.yml'
+  pull_request:
+    paths:
+      - 'email-worker/**'
+      - '.github/workflows/email-worker.yml'
+
+jobs:
+  test:
+    name: Typecheck und Tests
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: email-worker
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Node einrichten
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: email-worker/package-lock.json
+
+      - name: Abhängigkeiten installieren
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Tests
+        run: npm test

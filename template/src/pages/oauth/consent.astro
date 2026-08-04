@@ -1,0 +1,149 @@
+---
+import Layout from '@levino/shipyard-base/layouts/Page.astro'
+import {
+	createAuthCode,
+	deletePendingAuthorization,
+	getClient,
+	getPendingAuthorization,
+} from '../../lib/db/oauth.js'
+import { instanceLabel } from '../../lib/db/instance.js'
+import { canEdit } from '../../server/auth/roles.js'
+import { verifyRequest } from '../../server/auth/index.js'
+
+export const prerender = false
+
+/**
+ * Zustimmungsseite des OAuth-Flows. `/authorize` legt eine "pending
+ * authorization" an und leitet hierher um; erst mit der Zustimmung entsteht
+ * ein echter Authorization Code.
+ *
+ * Die Identitaet des Nutzers kommt aus der normalen Anmeldung der Website
+ * (Auth-Abstraktion in src/server/auth/). Diese Seite liegt bewusst NICHT auf
+ * einem oeffentlichen Pfad — die Website-Middleware verlangt hier eine
+ * Anmeldung, und zusaetzlich pruefen wir hier noch einmal selbst.
+ */
+
+const url = new URL(Astro.request.url)
+const pendingId = url.searchParams.get('pending_id')
+
+if (!pendingId) {
+	return new Response('pending_id fehlt', { status: 400 })
+}
+
+const pending = getPendingAuthorization(pendingId)
+if (!pending) {
+	return new Response('Anfrage unbekannt oder abgelaufen', { status: 410 })
+}
+
+const client = getClient(pending.client_id)
+if (!client) {
+	return new Response('Unbekannter Client', { status: 410 })
+}
+
+const auth = await verifyRequest(Astro.request)
+if (!auth.ok) {
+	return new Response(
+		auth.reason === 'unauthenticated'
+			? 'Bitte zuerst auf der Website anmelden und diesen Link erneut oeffnen.'
+			: 'Dieser Zugang gehoert nicht zur Klasse.',
+		{ status: auth.reason === 'unauthenticated' ? 401 : 403 },
+	)
+}
+
+const userId = auth.user.id
+
+if (Astro.request.method === 'POST') {
+	const form = await Astro.request.formData()
+	const action = form.get('action')
+	const redirectUrl = new URL(pending.redirect_uri)
+	if (pending.state) {
+		redirectUrl.searchParams.set('state', pending.state)
+	}
+	deletePendingAuthorization(pendingId)
+	if (action === 'approve') {
+		const code = createAuthCode({
+			client_id: pending.client_id,
+			user_id: userId,
+			// Die Rollen wandern mit in den Code und von dort in die Tokens. Ein
+			// MCP-Client hat kein Sitzungs-Cookie; ohne diese Zeile wuesste
+			// `/mcp` spaeter nicht, ob dieser Zugang aendern darf.
+			roles: auth.user.roles,
+			code_challenge: pending.code_challenge,
+			code_challenge_method: pending.code_challenge_method,
+			redirect_uri: pending.redirect_uri,
+			scopes: pending.scopes ?? undefined,
+			resource: pending.resource ?? undefined,
+		})
+		redirectUrl.searchParams.set('code', code)
+	} else {
+		redirectUrl.searchParams.set('error', 'access_denied')
+		redirectUrl.searchParams.set(
+			'error_description',
+			'Die Anfrage wurde abgelehnt.',
+		)
+	}
+	return Astro.redirect(redirectUrl.toString())
+}
+
+const scopeList = pending.scopes ?? ['mcp']
+
+// Dieselbe Funktion, die auch der MCP-Server fragt (src/lib/roles.ts) — die
+// Zustimmungsseite soll nicht mehr versprechen, als das Token spaeter kann.
+const mayEdit = canEdit(auth.user.roles)
+---
+
+<Layout title="Anwendung autorisieren">
+  <div class="container mx-auto px-4 py-12 max-w-xl">
+    <h1 class="text-2xl font-bold mb-4">Anwendung autorisieren</h1>
+    <p class="mb-6">
+      <strong>{client.client_name}</strong> moechte auf die Mitglieder- und
+      Verteilerverwaltung der Instanz <strong>{instanceLabel()}</strong> zugreifen.
+    </p>
+
+    <div class="not-prose bg-base-100 shadow rounded-lg p-4 mb-6">
+      <p class="text-sm opacity-70 mb-2">Wer fragt:</p>
+      <p class="font-mono text-sm">{client.client_name}</p>
+      <p class="text-xs opacity-50 font-mono break-all">
+        client_id: {client.client_id}
+      </p>
+      {client.client_uri && (
+        <p class="text-xs opacity-50 mt-1">
+          <a href={client.client_uri} target="_blank" rel="noopener" class="link link-primary">
+            {client.client_uri}
+          </a>
+        </p>
+      )}
+
+      <p class="text-sm opacity-70 mt-4 mb-1">Berechtigungen:</p>
+      <ul class="text-sm list-disc list-inside">
+        {scopeList.map((s) => (
+          <li class="font-mono">{s}</li>
+        ))}
+      </ul>
+
+      <p class="text-sm opacity-70 mt-4 mb-1">Redirect-URI:</p>
+      <p class="font-mono text-xs break-all">{pending.redirect_uri}</p>
+    </div>
+
+    <p class="text-sm opacity-70 mb-6">
+      Angemeldet als <strong>{auth.user.email}</strong>. Die Verbindung gibt
+      Zugriff auf Namen und E-Mail-Adressen der Eltern dieser Klasse — nur
+      zustimmen, wenn die Anfrage wirklich von dir stammt.
+    </p>
+
+    <p class="text-sm opacity-70 mb-6">
+      {mayEdit
+        ? 'Dieser Zugang hat die Rolle "admin": die Verbindung darf Mitglieder, Gruppen und Listen aendern und an Listen senden.'
+        : 'Dieser Zugang hat nur die Rolle "mitglied": die Verbindung darf lesen, aber nichts aendern und nicht senden.'}
+    </p>
+
+    <form method="POST" class="flex gap-3">
+      <button type="submit" name="action" value="approve" class="btn btn-primary flex-1">
+        Autorisieren
+      </button>
+      <button type="submit" name="action" value="deny" class="btn btn-ghost flex-1">
+        Ablehnen
+      </button>
+    </form>
+  </div>
+</Layout>

@@ -18,13 +18,14 @@
  *      SCHOOL_NAME).
  *   2. Technische Bezeichner - dürfen NICHT einseitig geändert werden, weil
  *      außerhalb dieses Repositories etwas daran hängt (SITE_DOMAIN,
- *      AUTH_GROUP, CALENDAR_PATH). Jeder trägt unten seine Begründung.
+ *      AUTH_ROLE, CALENDAR_PATH). Jeder trägt unten seine Begründung.
  */
 
 /**
- * Anzeigename der Klasse. Erscheint im Seitentitel, in der Kopfzeile und in
- * den Beschreibungstexten. Das ist der Wert, der beim Wechsel der
- * Klassenlehrkraft angepasst wird - und zwar nur dieser.
+ * Anzeigename der Klasse. Erscheint im Seitentitel, in der Kopfzeile, in den
+ * Beschreibungstexten und als Absendername der Rundmails
+ * (`mailFromName()` in `src/lib/email/config.ts`). Das ist der Wert, der beim
+ * Wechsel der Klassenlehrkraft angepasst wird - und zwar nur dieser.
  */
 export const CLASS_NAME = '{{ class_display_name }}'
 
@@ -46,29 +47,43 @@ export const SCHOOL_NAME = '{{ school_name }}'
  */
 export const SITE_DOMAIN = '{{ site_domain }}'
 
-/** Vollständige Basis-URL der Website. */
+/**
+ * Vollständige Basis-URL der Website.
+ *
+ * Sie ist zugleich der Fallback für den Aussteller des OAuth-Servers am
+ * MCP-Endpunkt (`publicBaseUrl()` in `src/server/config.ts`). Im Cluster wird
+ * stattdessen `PUBLIC_BASE_URL` gesetzt - zeichengenau die Adresse, unter der
+ * die Instanz erreichbar ist, sonst verwirft ein MCP-Client die Tokens.
+ */
 export const SITE_URL = `https://${SITE_DOMAIN}`
 
 /** GitHub-Repository dieser Website. */
 export const REPO_URL = 'https://github.com/{{ github_org }}/{{ repo_name }}'
 
 /**
- * Name der Benutzergruppe im Auth-Backend (PocketBase).
+ * Projektrolle in ZITADEL, die Zugang zu dieser Seite gewährt.
  *
- * Technischer Bezeichner, und der gefährlichste in dieser Datei. Der Wert ist
- * KEIN Anzeigename: Er muss exakt dem Gruppennamen entsprechen, unter dem die
- * Eltern in PocketBase eingetragen sind. Wird er hier geändert, ohne die
- * Gruppe dort vorher umzubenennen, findet die Auth-Prüfung niemanden mehr und
- * sämtliche Eltern sind ausgesperrt - die Seite antwortet dann jedem mit 401.
+ * Technischer Bezeichner, und der gefährlichste in dieser Datei. Maßgeblich
+ * ist, wer im ZITADEL-Projekt dieser Klasse die Rolle `mitglied` hat.
  *
- * Wer ihn ändern will, muss beides zusammen tun: zuerst die Gruppe in
- * PocketBase umbenennen, dann diesen Wert und `AUTH_POCKETBASE_GROUP` im
- * `Dockerfile` anpassen.
+ * Warum der Name gefahrlos derselbe sein darf wie in den Nachbarklassen:
+ * ZITADEL liefert im Token nur die Rollen **des Projekts, zu dem der
+ * OIDC-Client dieser Seite gehört**. Ein Elternteil mit `mitglied` in einer
+ * anderen Klasse trägt hier gar keine Rolle im Token und wird abgewiesen; wer
+ * Kinder in mehreren Klassen hat, hat mehrere Grants und kommt in alle Seiten.
+ * Die Trennung entsteht aus der Projektzuordnung, nicht aus dem Namen.
+ *
+ * Wer den Wert ändert, muss die Rolle vorher im ZITADEL-Projekt dieser Klasse
+ * anlegen und die Grants der Eltern umhängen - sonst sperrt es alle aus.
+ * Rollen und Grants sind Identity-Content und werden über die ZITADEL-API
+ * gepflegt, nicht in einem Repository.
+ *
+ * Wirksam wird der Wert über `OIDC_REQUIRED_ROLE` (siehe `Dockerfile`); diese
+ * Konstante hält ihn dokumentiert an derselben Stelle wie die übrigen
+ * zentralen Bezeichnungen. Wer BEARBEITEN darf, hängt dagegen an der Rolle
+ * `admin` desselben Projekts - siehe `src/server/auth/roles.ts`.
  */
-export const AUTH_GROUP = '{{ auth_group }}'
-
-/** URL der PocketBase-Instanz, gegen die angemeldet wird. */
-export const AUTH_POCKETBASE_URL = '{{ auth_pocketbase_url }}'
+export const AUTH_ROLE = 'mitglied'
 
 /**
  * Pfad des Klassenkalenders.
@@ -88,6 +103,12 @@ export const CALENDAR_PATH = '/public/{{ calendar_filename }}'
 
 /** `webcal://`-Adresse zum Abonnieren des Klassenkalenders. */
 export const CALENDAR_WEBCAL_URL = `webcal://${SITE_DOMAIN}${CALENDAR_PATH}`
+
+/**
+ * Adresse für technische Rückfragen - etwa für Eltern, die angemeldet, aber
+ * noch nicht freigeschaltet sind.
+ */
+export const CONTACT_MAIL = '{{ contact_email }}'
 {% if plausible_script_url %}
 
 /** Skript der Besucherzählung (Plausible). Leerer String = keine Statistik. */

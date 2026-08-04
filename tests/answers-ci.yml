@@ -9,9 +9,12 @@ repo_name: klasse-musterfrau
 base_domain: example.org
 site_domain: klasse-musterfrau.example.org
 contact_email: post@example.org
-mailing_list: eltern-klasse-musterfrau@example.org
-auth_pocketbase_url: https://api.example.org
-auth_group: musterfrau
+oidc_issuer: https://id.example.org
+zitadel_org_id: "000000000000000001"
+zitadel_project_id: "000000000000000002"
+mail_from: noreply@example.org
+list_base_domain: lists.example.org
+worker_name: klasse-musterfrau
 calendar_filename: musterfrau.ics
 gitops_repo: fws-maschsee/server-config
 target_arch: amd64

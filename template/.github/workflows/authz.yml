@@ -1,0 +1,86 @@
+name: Autorisierung
+
+# Die Autorisierungs-Tests. Sie pruefen gegen den vollen Stack, wer diese
+# Klassenseite und ihren MCP-Endpunkt sehen und aendern darf — mit einem
+# ECHTEN ZITADEL, das dieser Lauf sich selbst hochfaehrt.
+#
+# Drei Regeln, die diesen Workflow bestimmen:
+#
+#   1. Kein Test ruft einen Dienst auf, der nicht in diesem Lauf laeuft.
+#      Weder die Produktivinstanz noch id.example.org.
+#   2. Kein Mock. Ein nachgebautes ZITADEL prueft den Nachbau. Genau die
+#      Fehler, gegen die diese Tests stehen — Rollen im Token veralten, eine
+#      neu vergebene Rolle kommt nicht an, ein Entzug wirkt nie — haette ein
+#      Mock nicht gezeigt.
+#   3. Dieser Job bekommt KEINE Zugangsdaten fuer den Betrieb. Kein
+#      Operator-PAT, kein SES-Zugang, kein GHCR-Token. Er braucht auch keine:
+#      alles, was die Tests an Credentials benutzen, stellt die Wegwerf-Instanz
+#      sich in `tests/e2e/authz/stack.mjs` selbst aus.
+#
+# `secrets` taucht unten deshalb nirgends auf. Das ist keine Auslassung.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: authz-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  authz:
+    runs-on: ubuntu-latest
+    # Grosszuegig, aber begrenzt: haengt der Stack, soll der Job abbrechen und
+    # nicht sechs Stunden einen Runner belegen.
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - run: npm ci
+
+      - name: Playwright-Browser installieren
+        run: npx playwright install --with-deps chromium
+
+      # Die Images vorab holen, damit ein langsamer Registry-Zugriff nicht als
+      # Zeitueberschreitung beim Hochfahren erscheint. Die Versionen sind in
+      # stack.mjs gepinnt und muessen hier dieselben sein.
+      - name: Container-Images holen
+        run: |
+          docker pull postgres:17-alpine
+          docker pull ghcr.io/zitadel/zitadel:v4.13.1
+          docker pull ghcr.io/zitadel/zitadel-login:v4.13.1
+
+      # Faehrt PostgreSQL, ZITADEL und dessen Anmeldeoberflaeche hoch, legt
+      # ueber die API Org, Projekte, Rollen und Testnutzer an, baut die
+      # Anwendung und startet sie gegen dieses ZITADEL.
+      - name: Stack hochfahren
+        run: npm run authz:up
+
+      - name: Autorisierungs-Tests
+        run: npm run test:e2e:authz
+
+      - name: Logs bei Fehlschlag
+        if: failure()
+        run: npm run authz:logs
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: playwright-report-authz
+          path: playwright-report/
+          retention-days: 30
+
+      - name: Stack abraeumen
+        if: always()
+        run: npm run authz:down

@@ -8,13 +8,23 @@ _envops:
   trim_blocks: true
   lstrip_blocks: true
 
-# Die Lockfile wird beim Erzeugen mitgeliefert, damit `npm ci` im Dockerfile
+# Die Lockfiles werden beim Erzeugen mitgeliefert, damit `npm ci` im Dockerfile
 # sofort funktioniert. Bei `copier update` gewinnt aber die Lockfile der
 # Instanz: dort haben Dependabot und lokale `npm install`-Läufe längst neuere
 # Auflösungen eingetragen, und ein Rückschreiben der Template-Lockfile würde
 # die Instanz auf den Stand des Templates zurückwerfen.
+#
+# Das Produktions-Overlay steht ebenfalls hier: `deploy/overlays/production/`
+# trägt den gepinnten Image-Tag (den der Deploy-Workflow schreibt) und die
+# SealedSecrets der Instanz. Beides ist Zustand der Klasse, kein Vorlagen-
+# Inhalt — ein `copier update` würde sonst das laufende Deployment auf einen
+# Platzhalter zurücksetzen.
 _skip_if_exists:
   - package-lock.json
+  - email-worker/package-lock.json
+  - deploy/overlays/production/kustomization.yaml
+  - deploy/overlays/production/sealed-oidc.yaml
+  - deploy/overlays/production/sealed-mail.yaml
 
 # ---------------------------------------------------------------------------
 # Klasse
@@ -24,7 +34,7 @@ class_display_name:
   type: str
   help: >-
     Anzeigename der Klasse, so wie er auf der Website steht
-    (z. B. "Klasse Wiesen"). Der einzige Wert, der beim Wechsel der
+    (z. B. "Klasse Musterfrau"). Der einzige Wert, der beim Wechsel der
     Klassenlehrkraft später angepasst wird.
   validator: >-
     {% if class_display_name | trim | length == 0 %}class_display_name darf nicht leer sein{% endif %}
@@ -32,10 +42,11 @@ class_display_name:
 class_slug:
   type: str
   help: >-
-    Technischer Kurzname, klein und ohne Umlaute (z. B. "wiesen"). Er steckt im
-    Repository-Namen, im Hostnamen, im Namen der Benutzergruppe und im
-    Dateinamen des Kalenders. NACH dem Erzeugen ist er praktisch unveränderlich
-    - siehe die Kommentare in src/site.config.ts.
+    Technischer Kurzname, klein und ohne Umlaute (z. B. "musterfrau"). Er
+    steckt im Repository-Namen, im Hostnamen, im Kubernetes-Namespace, im
+    Dateinamen der Datenbank und im Dateinamen des Kalenders. NACH dem Erzeugen
+    ist er praktisch unveränderlich - siehe die Kommentare in
+    src/site.config.ts.
   default: >-
     {{ class_display_name | lower | replace('klasse ', '') | replace('ä', 'ae') | replace('ö', 'oe') | replace('ü', 'ue') | replace('ß', 'ss') | replace(' ', '-') | trim }}
   validator: >-
@@ -66,8 +77,16 @@ github_org:
 
 repo_name:
   type: str
-  help: Name des erzeugten Repositories innerhalb der Organisation.
+  help: >-
+    Name des erzeugten Repositories innerhalb der Organisation. Derselbe Wert
+    ist zugleich Kubernetes-Namespace, Image-Name, Instanz-Identität
+    (MCP_INSTANCE_NAME), Dateiname der Datenbank und Klassen-Label der
+    Mailinglisten. Er wird beim ersten Start in die Datenbank geschrieben und
+    danach bei jedem Start dagegen geprüft - eine spätere Änderung fährt den
+    Server nicht mehr hoch.
   default: klasse-{{ class_slug }}
+  validator: >-
+    {% if not repo_name | regex_search('^[a-z0-9][a-z0-9-]*$') %}repo_name darf nur a-z, 0-9 und - enthalten (er ist zugleich Namespace und DNS-Label){% endif %}
 
 base_domain:
   type: str
@@ -84,46 +103,90 @@ site_domain:
     Vollständiger Hostname der Website. Der Vorgabewert ist der Normalfall.
     Abweichen nur, wenn die Klasse eine eigene, bereits registrierte Domain
     mitbringt - dieser Wert ist nach dem Livegang faktisch festgenagelt (DNS,
-    Zertifikat, Kalender-Abos, Lesezeichen der Eltern).
-  default: klasse-{{ class_slug }}.{{ base_domain }}
+    Zertifikat, Kalender-Abos, Lesezeichen der Eltern, redirect_uri am
+    OIDC-Client).
+  default: "{{ repo_name }}.{{ base_domain }}"
   validator: >-
     {% if '.' not in site_domain or ' ' in site_domain or '://' in site_domain %}site_domain muss ein reiner DNS-Name sein{% endif %}
 
 contact_email:
   type: str
-  help: E-Mail-Adresse für technische Rückfragen. Steht in der README.
+  help: >-
+    E-Mail-Adresse für technische Rückfragen. Steht in der README und auf der
+    Seite, die Eltern sehen, die angemeldet, aber noch nicht freigeschaltet
+    sind.
   default: post@levinkeller.de
   validator: >-
     {% if '@' not in contact_email %}contact_email muss eine E-Mail-Adresse sein{% endif %}
 
-mailing_list:
-  type: str
-  help: >-
-    E-Mail-Verteiler der Klasseneltern. Leer lassen, wenn es (noch) keinen
-    gibt - dann entfällt der Abschnitt in der README.
-  default: eltern-klasse-{{ class_slug }}@googlegroups.com
-
 # ---------------------------------------------------------------------------
-# Authentifizierung
+# Anmeldung (ZITADEL)
 # ---------------------------------------------------------------------------
+# Die Anmeldung läuft über OpenID Connect gegen das zentrale ZITADEL der
+# Schule. Rollen, Grants und der OIDC-Client selbst sind Identity-Content: Sie
+# werden über die ZITADEL-API gepflegt und stehen in KEINEM Repository. Die
+# Vorlage fragt deshalb nur nach den Bezeichnern, die die App zur Laufzeit
+# braucht.
 
-auth_pocketbase_url:
+oidc_issuer:
   type: str
   help: >-
-    URL der PocketBase-Instanz, gegen die angemeldet wird. Sie verwaltet die
-    Konten und die OpenID-Anbieter (Google, GitHub).
-  default: https://api.levinkeller.de
-
-auth_group:
-  type: str
-  help: >-
-    Name der Benutzergruppe in PocketBase, die Zugriff auf diese Seite hat.
-    Der Wert ist KEIN Anzeigename, sondern der Bezeichner im Auth-Backend. Er
-    muss dort exakt so existieren, bevor die Seite live geht - sonst kommt
-    niemand hinein.
-  default: "{{ class_slug }}"
+    Aussteller-URL des zentralen ZITADEL, inklusive https://. Muss zeichengenau
+    dem `issuer` in dessen Discovery-Dokument entsprechen.
+  default: https://id.{{ base_domain }}
   validator: >-
-    {% if not auth_group | regex_search('^[a-z0-9_]+$') %}auth_group darf nur a-z, 0-9 und _ enthalten{% endif %}
+    {% if not oidc_issuer.startswith('https://') %}oidc_issuer muss mit https:// beginnen{% endif %}
+
+zitadel_org_id:
+  type: str
+  help: >-
+    Numerische ID der ZITADEL-Organisation der Schule. Wird gebraucht, um die
+    Rollen-Grants der Eltern zu lesen (Adressbuch-Abgleich). Steht im
+    ZITADEL-Dashboard; nicht geheim. Leer lassen, wenn das Projekt erst noch
+    angelegt wird - dann später in deploy/overlays/production/deployment.yaml
+    eintragen.
+  default: ""
+
+zitadel_project_id:
+  type: str
+  help: >-
+    Numerische ID des ZITADEL-PROJEKTS dieser Klasse. Jede Klasse hat ihr
+    eigenes Projekt; genau daraus entsteht die Trennung der Klassen
+    voneinander, denn ein Token trägt nur die Rollen des Projekts, zu dem der
+    OIDC-Client gehört. Leer lassen, wenn das Projekt erst noch angelegt wird.
+  default: ""
+
+# ---------------------------------------------------------------------------
+# Mailinglisten und Versand
+# ---------------------------------------------------------------------------
+
+mail_from:
+  type: str
+  help: >-
+    Verifizierte Absenderadresse für alles, was diese Instanz verschickt. Muss
+    in Amazon SES verifiziert sein, sonst weist SES die Mail ab.
+  default: noreply@{{ base_domain }}
+  validator: >-
+    {% if '@' not in mail_from %}mail_from muss eine E-Mail-Adresse sein{% endif %}
+
+list_base_domain:
+  type: str
+  help: >-
+    Listen-Domain OHNE Klassen-Label. Auf *.<list_base_domain> muss ein
+    Wildcard-MX zeigen; die Adressen dieser Klasse lauten dann
+    <liste>@<repo_name>.<list_base_domain>.
+  default: lists.{{ base_domain }}
+  validator: >-
+    {% if '.' not in list_base_domain or ' ' in list_base_domain %}list_base_domain muss ein reiner DNS-Name sein{% endif %}
+
+worker_name:
+  type: str
+  help: >-
+    Name des Cloudflare-Workers, der die Listenmail dieser Klasse annimmt. Er
+    taucht so im Cloudflare-Dashboard auf. Ein Worker je Klasse.
+  default: "{{ repo_name }}"
+  validator: >-
+    {% if not worker_name | regex_search('^[a-z0-9][a-z0-9-]*$') %}worker_name darf nur a-z, 0-9 und - enthalten{% endif %}
 
 # ---------------------------------------------------------------------------
 # Kalender
@@ -146,9 +209,10 @@ calendar_filename:
 gitops_repo:
   type: str
   help: >-
-    GitHub-Repository, in dem die Kubernetes-Manifeste der Schule liegen. Die
-    Deploy-Workflow-Zusammenfassung verweist darauf, weil dort der Image-Tag
-    festgeschrieben wird.
+    GitHub-Repository, in dem die Argo-CD-`Application` dieser Klasse liegt.
+    Die Kubernetes-Manifeste selbst bleiben hier, unter
+    deploy/overlays/production/ - dorthin schreibt der Deploy-Workflow den
+    gepinnten Image-Tag.
   default: fws-maschsee/server-config
 
 target_arch:

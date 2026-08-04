@@ -1,0 +1,296 @@
+# Email Worker — Mailinglisten der {{ class_display_name }}
+
+Cloudflare Email Worker, der eingehende Mail an die Mailinglisten dieser Klasse
+annimmt und an die App weiterreicht.
+
+```
+<liste>@{{ repo_name }}.{{ list_base_domain }}
+
+eltern@{{ repo_name }}.{{ list_base_domain }}
+```
+
+## Ein Worker je Klasse
+
+Der Worker liegt bewusst im Repository seiner Klasse: Website, Worker und
+App-Anbindung bleiben ein Stück. Eine neue Klasse generiert ihr Repo aus der
+Vorlage und hat alles beisammen, statt an einer zentralen Komponente
+mitkonfigurieren zu müssen — und ein kaputter Worker trifft eine Klasse statt
+alle.
+
+Fachlogik enthält er keine: keine Listen, keine Mitglieder, keine
+Empfängerauflösung. Er prüft die Form der Adresse und die Größe, alles Weitere
+entscheidet die App.
+
+### Beim Kopieren in ein anderes Klassen-Repo anzupassen
+
+| Ort | Wert |
+| --- | --- |
+| `wrangler.toml` → `name` | `<klasse>-mailinglisten` |
+| `wrangler.toml` → `APP_BASE_URL` | `https://{{ site_domain }}` |
+| `wrangler.toml` → `CLASS_SLUG` | `<klasse>` |
+| `package.json` → `name` | `<klasse>-email-worker` |
+
+Sonst nichts. `CLASS_SLUG` ist dabei kein Kommentar, sondern eine Prüfung —
+siehe unten.
+
+## Vertrag mit der App
+
+### `POST {APP_BASE_URL}/api/lists/incoming`
+
+`Content-Type: message/rfc822`, Body = die **rohe MIME-Mail**, unverändert.
+
+| Header | Inhalt |
+| --- | --- |
+| `X-List-Class` | Klassen-Label aus der Subdomain, z. B. `{{ repo_name }}`. Bereits gegen `[a-z0-9-]` validiert und gegen `CLASS_SLUG` geprüft |
+| `X-List-Name` | Listen-Localpart, z. B. `eltern`. Ebenso validiert |
+| `X-List-Recipient` | vollständige, kleingeschriebene Envelope-Empfängeradresse |
+| `X-List-Envelope-From` | SMTP `MAIL FROM` — **hierauf ist zu autorisieren** |
+| `X-List-Message-Id` | `Message-ID:` der Mail; fehlt, wenn die Mail keine hat |
+| `X-List-Timestamp` | Unix-Zeit in Sekunden, Dezimalstring |
+| `X-List-Signature` | `HMAC-SHA256(secret, "<timestamp>." + rawBody)`, hex |
+
+Antworten:
+
+| Status | Bedeutung | Reaktion des Workers |
+| --- | --- | --- |
+| `202` | angenommen und eingereiht | fertig |
+| `200` | angenommen, bewusst nicht verteilt (Schleife, Abwesenheitsnotiz, leere Liste) | fertig |
+| `403` | Absender nicht berechtigt, Liste inaktiv | `setReject(reason)` — dauerhafter SMTP-Fehler |
+| `404` | Liste unbekannt | `setReject(reason)` |
+| `413` | eigenes Größenlimit der App überschritten | `setReject(reason)` |
+| `401` | Signatur ungültig | Exception → temporärer SMTP-Fehler |
+| alles andere, Timeout, Netzfehler | Störung | Exception → temporärer SMTP-Fehler |
+
+Bei `403`/`404`/`413` liest der Worker den Grund aus `{"reason": "..."}` (oder
+nimmt den Body als Klartext) und gibt ihn dem Absender in der SMTP-Antwort
+zurück. Der Text sollte für Eltern verständlich sein und **nichts Vertrauliches
+enthalten** — er landet in einer Unzustellbarkeitsnachricht. Umlaute werden
+automatisch umgeschrieben (`ß` → `ss`), weil SMTP-Statuszeilen ASCII sind.
+
+### Signatur prüfen
+
+Signiert werden die **rohen Body-Bytes**, nicht ein normalisiertes JSON. Die App
+muss den Body also als Bytes lesen und *vor* dem Parsen prüfen:
+
+```
+erwartet = HMAC-SHA256(LIST_WEBHOOK_SECRET, "<X-List-Timestamp>." + rawBody), hex
+```
+
+Dazu sollte sie den Zeitstempel gegen ein Fenster (z. B. 300 Sekunden) prüfen
+(Replay-Schutz) und timing-safe vergleichen. Eine fertige
+Referenzimplementierung gibt es in `cdu-nordstemmen/vorstand` unter
+`src/lib/lists/signature.ts` (`verifyListSignature`) — das Format hier ist
+absichtlich identisch, der Code lässt sich übernehmen.
+
+### Pflichten der App
+
+* **Die Absenderprüfung liegt bei der App.** Der Worker prüft nur die Form der
+  Adresse und die Größe; wer senden darf, weiß nur die App. Ohne diese Prüfung
+  ist die Liste ein offenes Spam-Relay.
+* **Auf `X-List-Envelope-From` autorisieren**, nicht auf den `From:`-Header aus
+  dem Body. Der ist frei wählbar.
+* **Idempotent sein.** Ein temporärer Fehler führt zu erneuter Zustellung durch
+  den absendenden Server; dieselbe Mail kann mehrfach ankommen.
+  `X-List-Message-Id` plus Liste ist der natürliche Schlüssel (Vorbild:
+  `email_send_log` in `cdu-nordstemmen/vorstand`).
+* **Schleifen und Automaten abfangen** (`List-Id`, `Auto-Submitted`,
+  `Precedence: bulk|list|junk`) und mit `200` beantworten, nicht mit `403` — eine
+  Ablehnung gegenüber einem Autoresponder erzeugt nur Ping-Pong.
+* **`X-List-Class` gegen die eigene Klasse prüfen.** Der Worker tut das bereits;
+  eine zweite Prüfung in der App kostet nichts und deckt eine falsch gesetzte
+  Worker-Variable auf.
+
+## Entscheidungen
+
+### Post für eine andere Klasse wird abgewiesen, nicht weitergereicht
+
+`CLASS_SLUG` sagt, welche Klasse dieser Worker bedient. Der Klassenteil der
+Empfängeradresse wird dagegen geprüft; passt er nicht, wird die Mail abgewiesen
+und die App gar nicht erst aufgerufen.
+
+Ohne diese Prüfung würde eine falsch gesetzte Cloudflare-Regel genügen, damit
+Elternpost der einen Klasse bei der anderen landet. Das wäre ein
+Datenschutzvorfall, kein Betriebsfehler — deshalb sitzt die Prüfung direkt im
+Parser (`parseListRecipient`), wo man sie nicht vergessen kann, und nicht als
+nachträgliches `if` im Handler. Der Fall wird zusätzlich ins Log geschrieben,
+weil er immer auf eine kaputte Routing-Regel hinweist.
+
+### Unberechtigte Absender werden abgelehnt, nicht stillschweigend verworfen
+
+`message.setReject(...)` erzeugt einen dauerhaften SMTP-Fehler **innerhalb
+derselben SMTP-Sitzung**. Die Unzustellbarkeitsnachricht schreibt damit der
+Mailserver des Absenders an seinen eigenen, authentifizierten Nutzer — das ist
+kein Backscatter (der entstünde nur, wenn wir erst annehmen und danach bouncen).
+
+Gegen stilles Verwerfen spricht der Alltag: Schreibt ein Elternteil von seiner
+zweiten Adresse an die Liste, hält es die Mail für zugestellt und wartet auf
+Antworten, die nie kommen. In einer Klassenkommunikation ist die verlorene
+Nachricht der teurere Fehler.
+
+Der Einwand, eine Ablehnung verrate die Existenz der Adresse, wiegt hier leicht:
+Innerhalb der Klasse ist sie ohnehin bekannt, und Cloudflare beantwortet
+unbekannte Adressen bereits mit 550 — unterscheidbar ist es also sowieso.
+Wichtig ist nur, dass der `reason`-Text keine Interna preisgibt; das liegt bei
+der App.
+
+### Autorisiert wird der Envelope-Absender
+
+`message.from` ist das SMTP `MAIL FROM` des einliefernden Servers; darauf laufen
+SPF und DMARC. Der `From:`-Header im Body ist reiner Text und beliebig
+fälschbar. Der Worker schickt deshalb den Envelope-Absender als eigenen Header
+mit und markiert ihn als das maßgebliche Feld; der `From:`-Header steckt
+weiterhin im Body und ist Sache der App.
+
+Restlücke: Wer den Envelope-Absender eines berechtigten Elternteils fälschen
+kann und dessen SPF-Record das zulässt, kommt durch. Das ist die übliche Grenze
+adressbasierter Mailinglisten; enger wird es nur durch eine strengere
+DMARC-Auswertung in der App.
+
+### App-Fehler führen zu einem temporären, nicht dauerhaften Fehler
+
+Ist die App nicht erreichbar, antwortet sie mit 5xx oder läuft in ein Timeout,
+wirft der Worker. Die SMTP-Sitzung endet dann mit einem temporären Fehler und
+der absendende Server stellt über Stunden bis Tage erneut zu — ein kurzer
+Ausfall heilt sich damit von selbst, ohne dass jemand etwas merkt.
+
+Die Alternativen sind beide schlechter: Stillschweigend annehmen verliert die
+Mail endgültig, ein dauerhaftes `setReject` gibt dem Absender die Schuld an
+unserem Ausfall und zwingt ihn, die Mail von Hand erneut zu schreiben.
+
+`401` wird bewusst wie ein Ausfall behandelt und nicht wie eine Ablehnung: Eine
+nicht passende Signatur ist ein Konfigurationsfehler auf unserer Seite. Dasselbe
+gilt für fehlende oder unbrauchbare Variablen.
+
+**Vorbehalt:** Dass eine Exception im `email`-Handler tatsächlich zu einem
+temporären SMTP-Fehler führt, sichert Cloudflares Dokumentation nicht
+ausdrücklich zu — es gibt kein Gegenstück zu `setReject` für 4xx. Das Muster ist
+aus dem produktiv laufenden Worker in `cdu-nordstemmen/vorstand` übernommen.
+Sollte sich zeigen, dass Cloudflare stattdessen verwirft, müsste die Mail vor
+dem App-Aufruf zwischengespeichert werden (z. B. in R2) und asynchron
+nachgeliefert.
+
+### Größenlimit
+
+Cloudflare weist eingehende Mail über **25 MiB** bereits vor dem Worker ab
+([Email-Routing-Limits](https://developers.cloudflare.com/email-routing/limits/)).
+Der Worker prüft zusätzlich `message.rawSize` gegen `MAX_MESSAGE_BYTES`
+(Default **10 MiB**), und zwar *bevor* der Body-Stream gelesen wird.
+
+10 MiB, weil die App jede Mail vollständig parsen und anschließend an jeden
+Empfänger einzeln über SES ausliefern muss: Eine 25-MiB-Mail an 30 Eltern sind
+750 MiB ausgehend. Für Elternpost ist das reichlich; größere Dateien gehören auf
+die Website.
+
+Wird es überschritten, bekommt der Absender eine verständliche Ablehnung mit
+Zahlen ("Nachricht zu gross (12.4 MB, erlaubt sind 10.0 MB) …") statt eines
+Absturzes.
+
+### Adress-Parsing
+
+* Klassen- und Listen-Label müssen exakt `[a-z0-9]([a-z0-9-]*[a-z0-9])*`
+  entsprechen. Punkte, Unterstriche, Schrägstriche, führende oder doppelte
+  Bindestriche und (nach der Normalisierung) Großbuchstaben fallen durch.
+* Genau **ein** Label zwischen Localpart und Listen-Domain. `eltern@lists.…`
+  (ohne Klasse) und `eltern@a.{{ repo_name }}.lists.…` werden abgewiesen, nicht
+  „irgendwie" interpretiert.
+* Die Domain muss auf `.<LIST_DOMAIN>` enden — `boese{{ list_base_domain }}`
+  endet nur zufällig ähnlich und fällt durch.
+* Plus-Adressierung wird abgeschnitten (`eltern+foo` → Liste `eltern`), damit sie
+  weder eine unbekannte Liste erzeugt noch eine Prüfung umgeht.
+* Ein zweites `@` im Localpart wird abgewiesen.
+
+## Konfiguration
+
+Nicht geheime Werte stehen in `wrangler.toml` unter `[vars]`:
+
+| Name | Pflicht | Bedeutung |
+| --- | --- | --- |
+| `APP_BASE_URL` | ja | Basis-URL der App dieser Klasse, `https://`, ohne `/` am Ende |
+| `LIST_DOMAIN` | ja | Listen-Domain ohne Klassen-Label, z. B. `{{ list_base_domain }}` |
+| `CLASS_SLUG` | ja | Klasse, die dieser Worker bedient: `{{ repo_name }}` |
+| `MAX_MESSAGE_BYTES` | nein | Größenlimit in Bytes, Default `10485760` |
+| `REQUEST_TIMEOUT_MS` | nein | Timeout für den App-Aufruf, Default `10000` |
+
+Das Secret gehört **nicht** ins Repository — und es wird auch **nicht mit
+`wrangler` gesetzt**. `wrangler secret put` lädt eine neue Version des Workers
+hoch, und genau ein solcher Upload von Hand hat schon einmal den Maileingang
+zweier Klassen blockiert.
+
+Die Reihenfolge ist:
+
+1. Nach `main` pushen und den Build über die GitHub-Integration von Cloudflare
+   durchlaufen lassen.
+2. Danach `LIST_WEBHOOK_SECRET` im **Cloudflare-Dashboard** des Workers
+   eintragen (Settings → Variables and Secrets).
+
+Denselben Wert braucht die App im SealedSecret `{{ repo_name }}-mail`. Bis
+beide Seiten übereinstimmen, weist die App eingehende Listenpost mit 401 ab —
+sie fällt geschlossen aus, nicht offen.
+
+| Name | Bedeutung |
+| --- | --- |
+| `LIST_WEBHOOK_SECRET` | geteiltes HMAC-Secret; in der App dieser Klasse unter demselben Namen hinterlegen |
+
+Fehlt eine Pflichtvariable, wirft der Worker — eingehende Mail bleibt dann beim
+Absender in der Warteschlange, statt dauerhaft abgelehnt zu werden.
+
+## Routing in Cloudflare
+
+Zone `{{ base_domain }}`. Der Wildcard-MX auf
+`*.{{ list_base_domain }}` steht bereits. Bei einem Worker je Klasse braucht
+es im Email Routing eine **Regel je Listenadresse**
+(`<liste>@{{ repo_name }}.{{ list_base_domain }}` → *Send to a Worker* →
+`{{ worker_name }}`) statt eines Catch-alls. Diese Regeln legt der
+Betreiber per API an, nicht dieses Repository.
+
+Die echten Adressen `noreply@`, `bounce@`, `postmaster@` und `abuse@` auf
+`{{ base_domain }}` bleiben davon unberührt; sie sind für Sender-Callouts
+nötig und laufen nicht über diesen Worker. Der ausgehende Versand läuft über
+AWS SES in `eu-central-1` (`email-smtp.eu-central-1.amazonaws.com`, **Port
+2587** — 25/465/587 waren zwischenzeitlich blockiert, deshalb nicht auf 587
+„aufräumen"). Das ist Sache der App, nicht dieses Workers.
+
+## Deployment
+
+Ausschließlich über **Cloudflare Workers Builds**: Push auf `main` → Cloudflare
+baut und deployt. Es gibt bewusst keinen GitHub-Actions-Deploy und kein
+`wrangler deploy` mit API-Token, weil der Token nach wenigen Tagen abliefe.
+
+**Von Hand wird dieser Worker nie ausgerollt.** Kein `wrangler deploy`, kein
+`wrangler versions upload`, kein `wrangler secret put`. Ein einzelner solcher
+Upload hat den Maileingang zweier Klassen blockiert — die hochgeladene Version
+verdrängte die aus `main` gebaute, und eingehende Mail lief ins Leere.
+
+Einstellungen der Verknüpfung im Cloudflare-Dashboard:
+
+| | |
+| --- | --- |
+| Root directory | `email-worker` |
+| Build command | `npm ci` |
+| Deploy command | `npx wrangler deploy` |
+
+## Entwicklung
+
+```bash
+cd email-worker
+npm install
+npm test          # vitest
+npm run typecheck # tsc --noEmit
+npm run check     # biome
+```
+
+Dieses Verzeichnis ist ein eigenständiges npm-Projekt mit eigenen Abhängigkeiten
+und eigener `package-lock.json`, unabhängig von der Astro-App im Wurzelverzeichnis.
+
+Die Tests laufen in Node, nicht in der Workers-Runtime: Der Worker benutzt nur
+`fetch`, `crypto.subtle` und Web-Streams, die es in Node 20+ genauso gibt. Der
+`email`-Handler ist ein dünner Wrapper um `handleEmail(message, env)`, das gegen
+ein Objektliteral statt gegen eine echte `ForwardableEmailMessage` getestet wird.
+
+| Datei | Inhalt |
+| --- | --- |
+| `src/index.ts` | `email`-Handler und Ablauf |
+| `src/address.ts` | Zerlegen der Empfängeradresse, Prüfung gegen `CLASS_SLUG` |
+| `src/env.ts` | Konfiguration |
+| `src/app.ts` | HTTP-Aufruf an die App und Übersetzung der Antwort |
+| `src/signature.ts` | HMAC-Signatur |

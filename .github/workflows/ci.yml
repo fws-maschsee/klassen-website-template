@@ -60,7 +60,7 @@ jobs:
           files = sorted(
               glob.glob(os.path.join(root, ".github/workflows/*.yml"))
               + glob.glob(os.path.join(root, ".github/*.yml"))
-              + glob.glob(os.path.join(root, "deploy/*.yaml"))
+              + glob.glob(os.path.join(root, "deploy/overlays/production/*.yaml"))
               + glob.glob(os.path.join(root, "*.yaml"))
               + glob.glob(os.path.join(root, "src/content/blog/*.yml"))
           )
@@ -71,7 +71,27 @@ jobs:
           PY
 
       - name: Kustomize baut
-        run: kubectl kustomize "$INSTANCE/deploy" > /dev/null && echo "ok"
+        run: |
+          kubectl kustomize "$INSTANCE/deploy/overlays/production" > /dev/null
+          echo "ok"
+
+      # Die SealedSecrets der Vorlage sind GERUESTE. Sie duerfen niemals
+      # brauchbare Chiffrate enthalten: Ein SealedSecret ist fuer genau einen
+      # Namespace und einen Cluster verschluesselt, und ein echtes Chiffrat in
+      # einem oeffentlichen Repository waere bestenfalls wertlos.
+      - name: SealedSecrets sind Platzhalter
+        run: |
+          if ! grep -q 'PLATZHALTER-MIT-KUBESEAL-ERSETZEN' \
+               "$INSTANCE/deploy/overlays/production/sealed-oidc.yaml"; then
+            echo "::error::sealed-oidc.yaml traegt keine Platzhalter mehr"
+            exit 1
+          fi
+          if ! grep -q 'PLATZHALTER-MIT-KUBESEAL-ERSETZEN' \
+               "$INSTANCE/deploy/overlays/production/sealed-mail.yaml"; then
+            echo "::error::sealed-mail.yaml traegt keine Platzhalter mehr"
+            exit 1
+          fi
+          echo "ok"
 
       - name: .copier-answers.yml vorhanden
         run: |
@@ -111,9 +131,44 @@ jobs:
         working-directory: /tmp/instanz
         run: npm run typecheck
 
+      - name: Unit-Tests
+        working-directory: /tmp/instanz
+        run: npm test
+
       - name: Biome
         working-directory: /tmp/instanz
         run: npx @biomejs/biome ci
+
+  # Der Email-Worker ist ein eigenes npm-Projekt mit eigenem Lockfile. Er wird
+  # NICHT von hier ausgerollt — nur geprueft. Deployt wird er ausschliesslich
+  # ueber die GitHub-Integration von Cloudflare aus dem `main` der Instanz.
+  email-worker:
+    needs: generate
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+      - uses: astral-sh/setup-uv@v5
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Instanz erzeugen
+        run: |
+          uvx --from 'copier>=9.4' copier copy --defaults \
+            --data-file tests/answers-ci.yml --vcs-ref HEAD . "$INSTANCE"
+
+      - name: npm ci
+        working-directory: /tmp/instanz/email-worker
+        run: npm ci
+
+      - name: Typecheck
+        working-directory: /tmp/instanz/email-worker
+        run: npm run typecheck
+
+      - name: Tests
+        working-directory: /tmp/instanz/email-worker
+        run: npm test
 
   e2e:
     needs: generate
@@ -141,7 +196,7 @@ jobs:
 
       - name: End-to-End-Tests
         working-directory: /tmp/instanz
-        run: npm test
+        run: npm run test:e2e
 
       - uses: actions/upload-artifact@v4
         if: failure()
@@ -173,8 +228,14 @@ jobs:
         run: |
           # Nicht als root, schreibgeschütztes Root-Dateisystem, /tmp als
           # tmpfs - genau so läuft der Container im Cluster.
+          # /data muss beschreibbar sein, hier als tmpfs. Im Cluster ist das
+          # ein PersistentVolumeClaim. Ohne ihn legt dbmate die SQLite-Datei
+          # auf dem read-only rootfs an, scheitert mit "unable to open
+          # database file", der Server kommt nie hoch — und der Check unten
+          # meldet 000, was wie ein Problem der Anmeldung aussieht und keines
+          # ist.
           docker run -d --name smoke \
-            --user 1000:1000 --read-only --tmpfs /tmp \
+            --user 1000:1000 --read-only --tmpfs /tmp --tmpfs /data \
             -p 3000:3000 klassenseite:verify
           CODE=000
           for _ in $(seq 1 30); do

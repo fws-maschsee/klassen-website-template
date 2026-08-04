@@ -50,10 +50,40 @@ Raw-Blöcke gesetzt werden. Die anderen Workflows sind bewusst **keine**
 `.jinja`-Dateien - sie brauchen keine Variablen und werden dadurch nicht
 angefasst.
 
-## Die Lockfile
+## Was NIE in dieses Repository kommt
 
-`template/package-lock.json` wird mitgeliefert, damit `npm ci` in der neuen
-Klasse sofort funktioniert und das Docker-Image reproduzierbar ist.
+Es ist **öffentlich**. Deshalb, ohne Ausnahme:
+
+- **Keine echten Personendaten.** Nicht in `template/src/content/`, nicht in
+  Beispieldaten, nicht in Migrationen, nicht in Test-Fixtures, nicht in
+  Kommentaren. Erfundene Namen und `example.org`-Adressen (RFC 2606).
+- **Keine Secrets.** Die SealedSecrets unter
+  `template/deploy/overlays/production/` sind **Gerüste** mit dem Platzhalter
+  `PLATZHALTER-MIT-KUBESEAL-ERSETZEN`; die CI prüft, dass das so bleibt. Ein
+  SealedSecret ist ohnehin für genau einen Namespace und Cluster
+  verschlüsselt - das Chiffrat einer Klasse ist anderswo wertlos.
+- **Keine Namen realer Klassen** als Beispielwerte. In Tests und Kommentaren
+  stehen `klasse-musterfrau` und `klasse-nachbar`.
+
+## Was hier NICHT abgebildet wird
+
+**ZITADEL.** Projekt, Rollen, OIDC-Client und die Grants der Eltern sind
+Identity-Content: Sie werden über die ZITADEL-API gepflegt und stehen in
+keinem Repository. Die Vorlage fragt nur nach `oidc_issuer`,
+`zitadel_org_id` und `zitadel_project_id` - den Bezeichnern, die die App zur
+Laufzeit braucht - und `template/deploy/README.md.jinja` beschreibt, was
+außerhalb angelegt werden muss.
+
+**Das Ausrollen des Email-Workers.** Er wird ausschließlich über die
+GitHub-Integration von Cloudflare aus `main` gebaut. Kein `wrangler deploy`,
+kein `wrangler versions upload`, kein `wrangler secret put` - auch nicht zum
+Ausprobieren.
+
+## Die Lockfiles
+
+`template/package-lock.json` und `template/email-worker/package-lock.json`
+werden mitgeliefert, damit `npm ci` in der neuen Klasse sofort funktioniert und
+das Docker-Image reproduzierbar ist.
 
 Nach jeder Änderung an `template/package.json` muss sie neu erzeugt werden:
 
@@ -63,28 +93,33 @@ cd /tmp/instanz && npm install
 cp package-lock.json <vorlage>/template/package-lock.json
 ```
 
-Der Paketname ist absichtlich generisch (`klassen-website`) und nicht der
-Klassenname - sonst müsste die Lockfile eine `.jinja`-Datei sein, und ein
-Lehrkraftwechsel würde sie anfassen.
+Der Paketname ist absichtlich generisch (`klassen-website` bzw.
+`klassen-website-email-worker`) und nicht der Klassenname - sonst müssten die
+Lockfiles `.jinja`-Dateien sein, und ein Lehrkraftwechsel würde sie anfassen.
 
-`_skip_if_exists` in `copier.yml` schützt die Lockfile der Instanz vor
+`_skip_if_exists` in `copier.yml` schützt die Lockfiles der Instanz vor
 `copier update`: Dort haben Dependabot und lokale Installationen längst neuere
-Auflösungen eingetragen.
+Auflösungen eingetragen. Dieselbe Liste schützt
+`deploy/overlays/production/kustomization.yaml` (trägt den gepinnten Image-Tag
+des laufenden Deployments) und die beiden SealedSecrets - ein `copier update`
+würde sonst eine laufende Klasse auf Platzhalter zurücksetzen.
 
 ## Referenzen
 
 Die Vorlage ist aus zwei laufenden Instanzen destilliert. Bei Zweifeln dort
 nachsehen, wie es wirklich läuft:
 
-- [`fws-maschsee/klasse-christophers`](https://github.com/fws-maschsee/klasse-christophers)
-  - produktiv, Quelle für Dockerfile, Deploy-Workflow und Smoke-Test
 - [`fws-maschsee/klasse-wiesen`](https://github.com/fws-maschsee/klasse-wiesen)
-  - Quelle für `src/site.config.ts`, Admonitions und die Eltern-README
+  - der vollständigere Stand und die Hauptquelle dieser Vorlage: Anmeldung,
+    Datenbank, MCP-Server, Mailinglisten, Produktions-Overlay
+- [`fws-maschsee/klasse-christophers`](https://github.com/fws-maschsee/klasse-christophers)
+  - die zweite laufende Instanz; die Unterschiede zu `klasse-wiesen` sind
+    genau die Werte, aus denen hier Platzhalter geworden sind
 - [`levino/agentops-community-stack`](https://github.com/levino/agentops-community-stack)
   - das Copier-Muster selbst (README §6 und §8)
 - [`fws-maschsee/server-config`](https://github.com/fws-maschsee/server-config)
   - das GitOps-Repository, in das `deploy/` kopiert wird
 
-Die sieben Fallen, die die Vorlage abfängt, stehen mit Begründung in der
+Die zehn Fallen, die die Vorlage abfängt, stehen mit Begründung in der
 [README](README.md). Wer eine davon "aufräumt", baut einen Ausfall nach, den es
 schon einmal gab.

@@ -1,0 +1,909 @@
+/**
+ * Anmeldung gegen das zentrale ZITADEL der Schule ({{ oidc_issuer }}).
+ *
+ * Ersetzt `@levino/pocketbase-auth`. Die App ist ein vollwertiger,
+ * vertraulicher OIDC-Client (Authorization Code + PKCE) und prüft die
+ * Berechtigung an der **Projektrolle** aus dem ID-Token, nicht an einem
+ * Gruppennamen.
+ *
+ * Warum die Rolle und nicht eine Gruppe: ZITADEL liefert im Claim
+ * `urn:zitadel:iam:org:project:roles` genau die Rollen **des Projekts, zu dem
+ * dieser Client gehört**. Ein Elternteil mit Kindern in zwei Klassen hat in
+ * beiden Projekten den Grant `mitglied` und kommt damit in beide Seiten,
+ * während ein Grant in der jeweils anderen Klasse hier gar nicht erst im Token
+ * auftaucht. Die Trennung der Klassen entsteht also durch die Projektzuordnung
+ * des Clients — nicht durch einen Namen, den man verwechseln kann.
+ *
+ * Sitzungsmodell (bewusst wie beim oauth2-proxy der Realinstanz
+ * `dorfpflege-roessing/docs`, dort über `--cookie-expire=720h` und
+ * `--cookie-refresh=1h` durchlitten):
+ *   - absolute Obergrenze 30 Tage (`SESSION_MAX_AGE_SECONDS`),
+ *   - alle 60 Minuten wird per Refresh-Token neu beim IdP nachgefragt
+ *     (`ROLE_RECHECK_SECONDS`). Erst dadurch wirkt ein entzogener Grant
+ *     zeitnah, ohne die Eltern täglich zur Anmeldung zu zwingen.
+ * Dafür wird `offline_access` angefordert; der Client hat den Refresh-Grant.
+ */
+
+import { createHash, randomBytes } from 'node:crypto'
+import {
+	createRemoteJWKSet,
+	EncryptJWT,
+	type JWTPayload,
+	jwtDecrypt,
+	jwtVerify,
+} from 'jose'
+import { rolesForUser } from './grants.js'
+import { canRead } from './roles.js'
+
+// --- Konstanten ------------------------------------------------------------
+
+/** ZITADEL-Claim mit den Rollen des Projekts, zu dem der Client gehört. */
+const ROLES_CLAIM = 'urn:zitadel:iam:org:project:roles'
+
+/** Name des Sitzungs-Cookies. */
+const SESSION_COOKIE = 'fws_session'
+
+/**
+ * Präfix der kurzlebigen Cookies für einen laufenden Anmeldevorgang.
+ *
+ * Bewusst **ein Cookie pro Anmeldeversuch** (Name enthält den `state`), nicht
+ * ein einziges festes Cookie. Mit einem festen Cookie überschreibt der zweite
+ * geöffnete Tab den `state` des ersten, und der Rücksprung des ersten Tabs
+ * scheitert an der State-Prüfung — beim oauth2-proxy ist das der berüchtigte
+ * 403 „Login Failed" / „none was a CSRF cookie", gegen den es dort
+ * `--cookie-csrf-per-request=true` gibt. Dasselbe Problem, dieselbe Lösung.
+ */
+const STATE_COOKIE_PREFIX = 'fws_auth_'
+
+/** Lebensdauer eines angefangenen Anmeldevorgangs (vgl. `--cookie-csrf-expire=15m`). */
+const STATE_MAX_AGE_SECONDS = 15 * 60
+
+/** Absolute Obergrenze der Sitzung: 30 Tage (vgl. `--cookie-expire=720h`). */
+const SESSION_MAX_AGE_SECONDS = 30 * 24 * 60 * 60
+
+/** Abstand, in dem die Rollen beim IdP neu geprüft werden (vgl. `--cookie-refresh=1h`). */
+const ROLE_RECHECK_SECONDS = 60 * 60
+
+/** Gültigkeit des Discovery-Dokuments im Speicher. */
+const DISCOVERY_TTL_MS = 60 * 60 * 1000
+
+const SCOPES = 'openid profile email offline_access'
+
+// --- Konfiguration ---------------------------------------------------------
+
+export interface OidcConfig {
+	issuer: string
+	clientId: string
+	clientSecret: string
+	/** Projektrolle, die Zugang gewährt — hier immer `mitglied`. */
+	requiredRole: string
+	/** 32 Byte Schlüssel für die Cookie-Verschlüsselung. */
+	sessionKey: Uint8Array
+}
+
+/** Fehlt Konfiguration, sagt das die App klar — statt undefiniert zu laufen. */
+export class OidcConfigError extends Error {}
+
+const readEnv = (name: string): string => (process.env[name] ?? '').trim()
+
+let cachedConfig: OidcConfig | null = null
+
+export const getOidcConfig = (): OidcConfig => {
+	if (cachedConfig) return cachedConfig
+
+	const issuer = readEnv('OIDC_ISSUER') || '{{ oidc_issuer }}'
+	const clientId = readEnv('OIDC_CLIENT_ID')
+	const clientSecret = readEnv('OIDC_CLIENT_SECRET')
+	const requiredRole = readEnv('OIDC_REQUIRED_ROLE') || 'mitglied'
+	const sessionSecret = readEnv('SESSION_SECRET')
+
+	const missing = [
+		clientId ? null : 'OIDC_CLIENT_ID',
+		clientSecret ? null : 'OIDC_CLIENT_SECRET',
+		sessionSecret ? null : 'SESSION_SECRET',
+	].filter(Boolean)
+
+	if (missing.length > 0) {
+		throw new OidcConfigError(
+			`Anmeldung nicht konfiguriert, es fehlt: ${missing.join(', ')}`,
+		)
+	}
+
+	cachedConfig = {
+		issuer: issuer.replace(/\/$/, ''),
+		clientId,
+		clientSecret,
+		requiredRole,
+		// SHA-256 über das Geheimnis statt roher Bytes: A256GCM verlangt exakt
+		// 32 Byte. Beim oauth2-proxy ist genau diese Längenanforderung eine der
+		// klassischen Startfehlerquellen ("cookie_secret must be 16, 24, or 32
+		// bytes"). Hier kann sie konstruktionsbedingt nicht auftreten — jedes
+		// beliebige Geheimnis wird auf 32 Byte abgebildet.
+		sessionKey: new Uint8Array(
+			createHash('sha256').update(sessionSecret).digest(),
+		),
+	}
+	return cachedConfig
+}
+
+// --- Discovery -------------------------------------------------------------
+
+interface Discovery {
+	authorization_endpoint: string
+	token_endpoint: string
+	jwks_uri: string
+	end_session_endpoint?: string
+}
+
+let discoveryCache: { at: number; issuer: string; doc: Discovery } | null = null
+
+const discover = async (issuer: string): Promise<Discovery> => {
+	if (
+		discoveryCache &&
+		discoveryCache.issuer === issuer &&
+		Date.now() - discoveryCache.at < DISCOVERY_TTL_MS
+	) {
+		return discoveryCache.doc
+	}
+	const response = await fetch(`${issuer}/.well-known/openid-configuration`)
+	if (!response.ok) {
+		throw new Error(
+			`OIDC-Discovery fehlgeschlagen (HTTP ${response.status}) bei ${issuer}`,
+		)
+	}
+	const doc = (await response.json()) as Discovery
+	discoveryCache = { at: Date.now(), issuer, doc }
+	return doc
+}
+
+let jwksCache: {
+	uri: string
+	jwks: ReturnType<typeof createRemoteJWKSet>
+} | null = null
+
+const getJwks = (uri: string) => {
+	if (!jwksCache || jwksCache.uri !== uri) {
+		jwksCache = { uri, jwks: createRemoteJWKSet(new URL(uri)) }
+	}
+	return jwksCache.jwks
+}
+
+// --- Cookies ---------------------------------------------------------------
+
+const parseCookies = (header: string | null): Record<string, string> => {
+	const result: Record<string, string> = {}
+	if (!header) return result
+	for (const part of header.split(';')) {
+		const index = part.indexOf('=')
+		if (index < 0) continue
+		const name = part.slice(0, index).trim()
+		if (!name) continue
+		result[name] = decodeURIComponent(part.slice(index + 1).trim())
+	}
+	return result
+}
+
+const serializeCookie = (
+	name: string,
+	value: string,
+	options: { maxAge: number; secure: boolean },
+): string => {
+	const parts = [
+		`${name}=${encodeURIComponent(value)}`,
+		'Path=/',
+		'HttpOnly',
+		// Lax und nicht Strict: der Rücksprung von ZITADEL ist eine
+		// Top-Level-Navigation von einer fremden Domain. Mit Strict käme das
+		// Cookie dabei nicht mit und die Anmeldung liefe endlos im Kreis.
+		'SameSite=Lax',
+		`Max-Age=${options.maxAge}`,
+	]
+	if (options.secure) parts.push('Secure')
+	return parts.join('; ')
+}
+
+const expireCookie = (name: string, secure: boolean): string =>
+	[
+		`${name}=`,
+		'Path=/',
+		'HttpOnly',
+		'SameSite=Lax',
+		'Max-Age=0',
+		'Expires=Thu, 01 Jan 1970 00:00:00 GMT',
+		...(secure ? ['Secure'] : []),
+	].join('; ')
+
+// --- Sitzung ---------------------------------------------------------------
+
+export interface Session {
+	/** ZITADEL-`sub` — der stabile Schlüssel für alles Fachliche. */
+	sub: string
+	email: string
+	name: string
+	/**
+	 * Projektrollen — IMMER frisch aus ZITADEL (`grants.ts`), NIE aus dem
+	 * Cookie. Das Cookie traegt nur die Identitaet; siehe `encryptSession`.
+	 */
+	roles: string[]
+	/** Refresh-Token für die gleitende Verlängerung. */
+	refreshToken?: string
+	/** Zeitpunkt der letzten Rollenprüfung beim IdP (Unix-Sekunden). */
+	checkedAt: number
+	/** Ablauf der Sitzung (Unix-Sekunden). */
+	expiresAt: number
+}
+
+/**
+ * Das Sitzungs-Cookie traegt AUSSCHLIESSLICH die Identitaet — kein `roles`.
+ *
+ * Rollen in einem Cookie waeren ein Abbild, das ab dem Moment des Schreibens
+ * altern kann. Ein entzogener Grant wuerde erst mit der naechsten
+ * Nachfrage wirken, ein hinzugefuegter erst dann sichtbar. Beides ist
+ * unnoetig, weil ZITADEL im selben Cluster laeuft: die Nachfrage kostet
+ * Millisekunden und passiert bei jeder Anfrage (siehe `resolveSession`).
+ */
+const encryptSession = async (
+	session: Session,
+	key: Uint8Array,
+): Promise<string> =>
+	new EncryptJWT({
+		sub: session.sub,
+		email: session.email,
+		name: session.name,
+		refreshToken: session.refreshToken,
+		checkedAt: session.checkedAt,
+		expiresAt: session.expiresAt,
+	} as unknown as JWTPayload)
+		.setProtectedHeader({ alg: 'dir', enc: 'A256GCM' })
+		.setIssuedAt()
+		.setExpirationTime(session.expiresAt)
+		.encrypt(key)
+
+const decryptSession = async (
+	value: string,
+	key: Uint8Array,
+): Promise<Session | null> => {
+	try {
+		const { payload } = await jwtDecrypt(value, key)
+		const session = payload as unknown as Session
+		// `roles` steht bewusst NICHT im Cookie und wird hier deshalb auch
+		// nicht geprueft. Sie kommen in `resolveSession` frisch aus ZITADEL.
+		if (!session?.sub) return null
+		session.roles = []
+		if (session.expiresAt <= Math.floor(Date.now() / 1000)) return null
+		return session
+	} catch {
+		return null
+	}
+}
+
+// --- Hilfsfunktionen -------------------------------------------------------
+
+const base64url = (buffer: Buffer): string => buffer.toString('base64url')
+
+const randomToken = (): string => base64url(randomBytes(32))
+
+const challengeFor = (verifier: string): string =>
+	base64url(createHash('sha256').update(verifier).digest())
+
+/**
+ * Basic-Auth-Header für den Token-Endpunkt.
+ *
+ * RFC 6749 §2.3.1 verlangt, dass Client-ID und -Secret vor dem Base64 noch
+ * `application/x-www-form-urlencoded`-kodiert werden. Ohne das bricht die
+ * Authentifizierung, sobald ZITADEL ein Secret mit Sonderzeichen ausgibt.
+ */
+const basicAuth = (clientId: string, clientSecret: string): string =>
+	`Basic ${Buffer.from(
+		`${encodeURIComponent(clientId)}:${encodeURIComponent(clientSecret)}`,
+	).toString('base64')}`
+
+/** Nur seiteninterne Ziele zulassen — sonst ist der Rücksprung ein Open Redirect. */
+const safeReturnTo = (value: string | null | undefined): string => {
+	if (!value) return '/'
+	if (!value.startsWith('/')) return '/'
+	if (value.startsWith('//')) return '/'
+	return value
+}
+
+/**
+ * Öffentliche Basis-URL dieser Seite — die Adresse, unter der die Eltern sie
+ * aufrufen.
+ *
+ * Daraus entstehen die `redirect_uri` (die ZEICHENGENAU zu der am OIDC-Client
+ * hinterlegten passen muss) und die Entscheidung, ob Cookies `Secure` gesetzt
+ * werden. Beides darf nicht davon abhängen, wie das Framework gerade den
+ * Host-Header auslegt:
+ *
+ * An denselben zwei Klassenseiten gemessen — Astro 5.16 baut `request.url` aus
+ * dem Host-Header, Astro 5.18 ignoriert ihn ohne konfigurierte
+ * `allowedDomains` und meldet `localhost`. Mit der zweiten Version wäre die
+ * `redirect_uri` `https://localhost/auth/callback` gewesen; ZITADEL hätte jede
+ * Anmeldung abgelehnt. Der Unterschied hing allein daran, welche Version das
+ * Lockfile aufgelöst hatte, und faellt beim Bauen nicht auf.
+ *
+ * Deshalb ist `OIDC_PUBLIC_ORIGIN` maßgeblich. Fehlt sie, werden die
+ * Weiterleitungs-Header des Reverse Proxy benutzt und erst zuletzt das, was
+ * das Framework meint.
+ */
+const publicOrigin = (request: Request): string => {
+	const configured = readEnv('OIDC_PUBLIC_ORIGIN')
+	if (configured) return configured.replace(/\/$/, '')
+
+	const first = (name: string): string | undefined =>
+		request.headers.get(name)?.split(',')[0]?.trim() || undefined
+
+	const url = new URL(request.url)
+	const host = first('x-forwarded-host') ?? first('host')
+	if (host) {
+		const proto = first('x-forwarded-proto') ?? url.protocol.replace(':', '')
+		return `${proto}://${host}`
+	}
+	return url.origin
+}
+
+const isSecureOrigin = (origin: string): boolean =>
+	origin.startsWith('https://')
+
+const redirectUriFor = (request: Request): string =>
+	`${publicOrigin(request)}/auth/callback`
+
+const htmlResponse = (
+	html: string,
+	status: number,
+	headers: HeadersInit = {},
+) =>
+	new Response(html, {
+		status,
+		headers: { 'Content-Type': 'text/html; charset=utf-8', ...headers },
+	})
+
+/** Erwartet der Aufrufer eine Seite (dann umleiten) oder nicht (dann 401)? */
+const wantsHtml = (request: Request): boolean =>
+	request.method === 'GET' &&
+	(request.headers.get('Accept') ?? '').includes('text/html')
+
+// --- Seiten ----------------------------------------------------------------
+
+const page = (title: string, body: string): string => `<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>${title}</title>
+<style>
+  body { font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+         margin: 0; padding: 3rem 1.5rem; background: #f8f8f7; color: #1f2328; }
+  main { max-width: 34rem; margin: 0 auto; background: #fff; border-radius: 12px;
+         padding: 2rem; box-shadow: 0 1px 3px rgba(0,0,0,.08); }
+  h1 { font-size: 1.4rem; margin-top: 0; }
+  p { line-height: 1.6; }
+  a.button, button { display: inline-block; margin-top: 1rem; padding: .6rem 1.1rem;
+         border: 0; border-radius: 8px; background: #1f6feb; color: #fff;
+         text-decoration: none; font-size: 1rem; cursor: pointer; }
+  code { background: #f0f0ef; padding: .1rem .3rem; border-radius: 4px; }
+</style>
+</head>
+<body><main>${body}</main></body>
+</html>`
+
+export const notAMemberPage = (
+	email: string,
+	className: string,
+	contactMail: string,
+): string =>
+	page(
+		'Keine Berechtigung',
+		`<h1>Du bist angemeldet, aber noch nicht freigeschaltet</h1>
+     <p>Du bist mit der E-Mail-Adresse <code>${escapeHtml(email)}</code> angemeldet,
+        hast für ${escapeHtml(className)} aber noch keine Freigabe.</p>
+     <p>Bitte melde Dich bei der Klassenelternvertretung oder schreibe an
+        <a href="mailto:${escapeHtml(contactMail)}">${escapeHtml(contactMail)}</a>,
+        damit Du freigeschaltet wirst. Gib dabei bitte die oben genannte
+        E-Mail-Adresse an.</p>
+     <p>Mit dem falschen Konto angemeldet?</p>
+     <a class="button" href="/auth/logout">Abmelden</a>`,
+	)
+
+const errorPage = (headline: string, detail: string): string =>
+	page(
+		'Anmeldung fehlgeschlagen',
+		`<h1>${escapeHtml(headline)}</h1>
+     <p>${escapeHtml(detail)}</p>
+     <a class="button" href="/">Noch einmal versuchen</a>`,
+	)
+
+const escapeHtml = (value: string): string =>
+	value
+		.replace(/&/g, '&amp;')
+		.replace(/</g, '&lt;')
+		.replace(/>/g, '&gt;')
+		.replace(/"/g, '&quot;')
+		.replace(/'/g, '&#039;')
+
+// --- Anmeldevorgang --------------------------------------------------------
+
+interface PendingLogin extends JWTPayload {
+	state: string
+	nonce: string
+	verifier: string
+	returnTo: string
+}
+
+/** Schritt 1: zum IdP umleiten und den Vorgang im Cookie festhalten. */
+export const startLogin = async (
+	request: Request,
+	returnTo: string,
+): Promise<Response> => {
+	const config = getOidcConfig()
+	const origin = publicOrigin(request)
+	const secure = isSecureOrigin(origin)
+	const discovery = await discover(config.issuer)
+
+	const state = randomToken()
+	const nonce = randomToken()
+	const verifier = randomToken()
+
+	const pending: PendingLogin = {
+		state,
+		nonce,
+		verifier,
+		returnTo: safeReturnTo(returnTo),
+	}
+	const cookieValue = await new EncryptJWT(pending)
+		.setProtectedHeader({ alg: 'dir', enc: 'A256GCM' })
+		.setIssuedAt()
+		.setExpirationTime(`${STATE_MAX_AGE_SECONDS}s`)
+		.encrypt(config.sessionKey)
+
+	const authorize = new URL(discovery.authorization_endpoint)
+	authorize.searchParams.set('client_id', config.clientId)
+	authorize.searchParams.set('response_type', 'code')
+	authorize.searchParams.set('scope', SCOPES)
+	authorize.searchParams.set('redirect_uri', redirectUriFor(request))
+	authorize.searchParams.set('state', state)
+	authorize.searchParams.set('nonce', nonce)
+	authorize.searchParams.set('code_challenge', challengeFor(verifier))
+	authorize.searchParams.set('code_challenge_method', 'S256')
+
+	return new Response(null, {
+		status: 302,
+		headers: {
+			Location: authorize.toString(),
+			'Set-Cookie': serializeCookie(
+				`${STATE_COOKIE_PREFIX}${state.slice(0, 16)}`,
+				cookieValue,
+				{ maxAge: STATE_MAX_AGE_SECONDS, secure },
+			),
+		},
+	})
+}
+
+interface TokenResponse {
+	id_token?: string
+	access_token?: string
+	refresh_token?: string
+	error?: string
+	error_description?: string
+}
+
+const exchange = async (
+	config: OidcConfig,
+	discovery: Discovery,
+	body: Record<string, string>,
+): Promise<TokenResponse> => {
+	const response = await fetch(discovery.token_endpoint, {
+		method: 'POST',
+		headers: {
+			'Content-Type': 'application/x-www-form-urlencoded',
+			Authorization: basicAuth(config.clientId, config.clientSecret),
+			Accept: 'application/json',
+		},
+		body: new URLSearchParams(body).toString(),
+	})
+	return (await response.json()) as TokenResponse
+}
+
+const rolesFromClaims = (claims: JWTPayload): string[] => {
+	const raw = claims[ROLES_CLAIM]
+	if (!raw || typeof raw !== 'object') return []
+	return Object.keys(raw as Record<string, unknown>)
+}
+
+const verifyIdToken = async (
+	config: OidcConfig,
+	discovery: Discovery,
+	idToken: string,
+	nonce?: string,
+): Promise<JWTPayload> => {
+	const { payload } = await jwtVerify(idToken, getJwks(discovery.jwks_uri), {
+		issuer: config.issuer,
+		audience: config.clientId,
+	})
+	if (nonce && payload.nonce !== nonce) {
+		throw new Error('nonce stimmt nicht')
+	}
+	return payload
+}
+
+const sessionFromClaims = (
+	claims: JWTPayload,
+	refreshToken: string | undefined,
+	previous?: Session,
+): Session => {
+	const now = Math.floor(Date.now() / 1000)
+	return {
+		sub: String(claims.sub),
+		email: String(claims.email ?? previous?.email ?? ''),
+		name: String(claims.name ?? previous?.name ?? ''),
+		roles: rolesFromClaims(claims),
+		refreshToken: refreshToken ?? previous?.refreshToken,
+		checkedAt: now,
+		// Die absolute Obergrenze wandert NICHT mit: sie zählt ab der ersten
+		// Anmeldung, sonst wäre die Sitzung faktisch unbegrenzt.
+		expiresAt: previous?.expiresAt ?? now + SESSION_MAX_AGE_SECONDS,
+	}
+}
+
+/** Schritt 2: Rücksprung vom IdP verarbeiten. */
+export const handleCallback = async (request: Request): Promise<Response> => {
+	const config = getOidcConfig()
+	const url = new URL(request.url)
+	const secure = isSecureOrigin(publicOrigin(request))
+	const cookies = parseCookies(request.headers.get('Cookie'))
+
+	const idpError = url.searchParams.get('error')
+	if (idpError) {
+		return htmlResponse(
+			errorPage(
+				'Die Anmeldung wurde abgebrochen',
+				url.searchParams.get('error_description') || idpError,
+			),
+			400,
+		)
+	}
+
+	const state = url.searchParams.get('state')
+	const code = url.searchParams.get('code')
+	if (!state || !code) {
+		return htmlResponse(
+			errorPage(
+				'Unvollständige Antwort',
+				'Der Anmeldedienst hat keinen Code geschickt.',
+			),
+			400,
+		)
+	}
+
+	const cookieName = `${STATE_COOKIE_PREFIX}${state.slice(0, 16)}`
+	const pendingCookie = cookies[cookieName]
+	if (!pendingCookie) {
+		// Häufigster Fall: der Anmeldevorgang ist älter als 15 Minuten oder der
+		// Tab wurde aus dem Verlauf erneut geöffnet. Kein Fehler, sondern ein
+		// Grund, sauber neu zu beginnen.
+		return startLogin(request, '/')
+	}
+
+	let pending: PendingLogin
+	try {
+		const { payload } = await jwtDecrypt(pendingCookie, config.sessionKey)
+		pending = payload as PendingLogin
+	} catch {
+		return startLogin(request, '/')
+	}
+
+	if (pending.state !== state) {
+		return htmlResponse(
+			errorPage(
+				'Sicherheitsprüfung fehlgeschlagen',
+				'Der Anmeldevorgang passt nicht zu diesem Browser.',
+			),
+			400,
+		)
+	}
+
+	const discovery = await discover(config.issuer)
+	const tokens = await exchange(config, discovery, {
+		grant_type: 'authorization_code',
+		code,
+		redirect_uri: redirectUriFor(request),
+		code_verifier: pending.verifier,
+	})
+
+	if (!tokens.id_token) {
+		return htmlResponse(
+			errorPage(
+				'Anmeldung fehlgeschlagen',
+				tokens.error_description || tokens.error || 'Kein ID-Token erhalten.',
+			),
+			502,
+		)
+	}
+
+	let claims: JWTPayload
+	try {
+		claims = await verifyIdToken(
+			config,
+			discovery,
+			tokens.id_token,
+			pending.nonce,
+		)
+	} catch (error) {
+		return htmlResponse(
+			errorPage(
+				'Anmeldung fehlgeschlagen',
+				`Das Token war nicht gültig: ${String(error)}`,
+			),
+			502,
+		)
+	}
+
+	const session = sessionFromClaims(claims, tokens.refresh_token)
+	const sessionCookie = await encryptSession(session, config.sessionKey)
+
+	const headers = new Headers({ Location: safeReturnTo(pending.returnTo) })
+	headers.append(
+		'Set-Cookie',
+		serializeCookie(SESSION_COOKIE, sessionCookie, {
+			maxAge: SESSION_MAX_AGE_SECONDS,
+			secure,
+		}),
+	)
+	headers.append('Set-Cookie', expireCookie(cookieName, secure))
+	return new Response(null, { status: 302, headers })
+}
+
+/** Abmelden: Cookie löschen und die Sitzung auch beim IdP beenden. */
+export const handleLogout = async (request: Request): Promise<Response> => {
+	const origin = publicOrigin(request)
+	const secure = isSecureOrigin(origin)
+	let target = `${origin}/`
+
+	try {
+		const config = getOidcConfig()
+		const discovery = await discover(config.issuer)
+		if (discovery.end_session_endpoint) {
+			const endSession = new URL(discovery.end_session_endpoint)
+			endSession.searchParams.set('client_id', config.clientId)
+			endSession.searchParams.set('post_logout_redirect_uri', `${origin}/`)
+			target = endSession.toString()
+		}
+	} catch {
+		// Ohne Konfiguration bleibt es beim lokalen Abmelden — das ist der
+		// wichtigere Teil und darf nicht an der Discovery scheitern.
+	}
+
+	return new Response(null, {
+		status: 302,
+		headers: {
+			Location: target,
+			'Set-Cookie': expireCookie(SESSION_COOKIE, secure),
+		},
+	})
+}
+
+// --- Verlängerung der Sitzung ----------------------------------------------
+
+/**
+ * Zwischenspeicher für gerade eingelöste Refresh-Tokens.
+ *
+ * ZITADEL **rotiert** Refresh-Tokens: beim Einlösen wird das alte sofort
+ * ungültig. Ein einziger Seitenaufruf erzeugt aber viele parallele Anfragen
+ * (HTML plus alle Dateien unter `/_astro/`), die alle dasselbe, noch alte
+ * Cookie mitbringen. Ohne diese Zusammenfassung gewinnt genau eine Anfrage
+ * und alle übrigen bekommen 401 — gemessen: von acht parallelen Anfragen
+ * waren sieben abgewiesen, die Seite kam ohne Stylesheet und ohne Skripte an.
+ *
+ * Deshalb: pro Refresh-Token genau ein Austausch, dessen Ergebnis sich alle
+ * teilen — auch die Anfragen, die kurz danach noch mit dem alten Cookie
+ * eintreffen, weil der Browser das neue noch nicht gesetzt hatte.
+ *
+ * Ein Zwischenspeicher im Arbeitsspeicher genügt, weil dieser Dienst
+ * ausdrücklich mit **einer** Replik läuft (server-config, AGENTS.md
+ * Invariante 8). Bei mehreren Repliken müsste das ein gemeinsamer Speicher
+ * sein.
+ */
+const refreshInFlight = new Map<
+	string,
+	{ at: number; result: Promise<Session | null> }
+>()
+
+/** Wie lange das Ergebnis eines Austauschs nachgenutzt werden darf. */
+const REFRESH_MEMO_MS = 60 * 1000
+
+const pruneRefreshCache = () => {
+	const cutoff = Date.now() - REFRESH_MEMO_MS
+	for (const [key, entry] of refreshInFlight) {
+		if (entry.at < cutoff) refreshInFlight.delete(key)
+	}
+}
+
+const exchangeRefreshToken = async (
+	config: OidcConfig,
+	previous: Session,
+): Promise<Session | null> => {
+	const discovery = await discover(config.issuer)
+	const tokens = await exchange(config, discovery, {
+		grant_type: 'refresh_token',
+		refresh_token: previous.refreshToken as string,
+		scope: SCOPES,
+	})
+	if (!tokens.id_token) return null
+	try {
+		const claims = await verifyIdToken(config, discovery, tokens.id_token)
+		return sessionFromClaims(claims, tokens.refresh_token, previous)
+	} catch {
+		return null
+	}
+}
+
+const refreshSession = async (
+	config: OidcConfig,
+	previous: Session,
+): Promise<Session | null> => {
+	const key = previous.refreshToken as string
+	pruneRefreshCache()
+
+	const existing = refreshInFlight.get(key)
+	if (existing) return existing.result
+
+	const result = exchangeRefreshToken(config, previous)
+	refreshInFlight.set(key, { at: Date.now(), result })
+	return result
+}
+
+// --- Prüfung pro Anfrage ---------------------------------------------------
+
+/** Urteil ohne HTTP-Antwort — die gemeinsame Grundlage beider Aufrufer. */
+export interface SessionOutcome {
+	/**
+	 * `unauthenticated` = niemand angemeldet (oder die Sitzung ist abgelaufen
+	 * bzw. wurde beim IdP beendet), `unauthorized` = angemeldet, aber ohne die
+	 * geforderte Projektrolle, `ok` = darf rein.
+	 */
+	state: 'unauthenticated' | 'unauthorized' | 'ok'
+	session: Session | null
+	/** Verlängertes Sitzungs-Cookie, falls gerade nachgefragt wurde. */
+	setCookie: string | null
+}
+
+export interface AuthOutcome {
+	/** Antwort, die statt der Seite ausgeliefert werden muss (oder `null`). */
+	response: Response | null
+	/** Angemeldete und berechtigte Person, falls vorhanden. */
+	session: Session | null
+	/**
+	 * Gesetzt, wenn die Sitzung gerade verlängert wurde. Die aufrufende
+	 * Middleware muss diesen Wert an die Antwort der Seite anhängen — sonst
+	 * läuft die Verlängerung ins Leere und die Seite fragt bei jeder Anfrage
+	 * erneut beim IdP nach.
+	 */
+	setCookie: string | null
+}
+
+const unauthenticated = async (request: Request): Promise<Response> => {
+	const url = new URL(request.url)
+	if (!wantsHtml(request)) {
+		// Alles, was keine Seite anfragt (Kalender-Clients, Monitoring, API),
+		// bekommt weiterhin einen klaren 401 statt einer Umleitung.
+		return new Response('Unauthorized', {
+			status: 401,
+			headers: { 'WWW-Authenticate': 'Bearer' },
+		})
+	}
+	return startLogin(request, `${url.pathname}${url.search}`)
+}
+
+/**
+ * Prüft eine Anfrage. Gibt entweder eine Antwort zurück (umleiten, 401, 403)
+ * oder die Sitzung, mit der die Seite gerendert werden darf.
+ */
+/**
+ * Kern der Prüfung, ohne HTTP-Antworten zu bauen.
+ *
+ * Getrennt von `authenticate`, weil dieselbe Prüfung an zwei sehr
+ * unterschiedlichen Stellen gebraucht wird: die Astro-Middleware will eine
+ * fertige Antwort (umleiten, 401, 403), der `AuthProvider` in `index.ts` will
+ * nur ein Urteil. Beide dürfen sich nicht auseinanderentwickeln.
+ */
+export const resolveSession = async (
+	request: Request,
+): Promise<SessionOutcome> => {
+	const config = getOidcConfig()
+	const secure = isSecureOrigin(publicOrigin(request))
+	const cookies = parseCookies(request.headers.get('Cookie'))
+
+	let session = await decryptSession(
+		cookies[SESSION_COOKIE] ?? '',
+		config.sessionKey,
+	)
+	if (!session) {
+		return { state: 'unauthenticated', session: null, setCookie: null }
+	}
+
+	let refreshedCookie: string | null = null
+	const now = Math.floor(Date.now() / 1000)
+
+	if (now - session.checkedAt > ROLE_RECHECK_SECONDS) {
+		if (!session.refreshToken) {
+			return { state: 'unauthenticated', session: null, setCookie: null }
+		}
+		const refreshed = await refreshSession(config, session)
+		if (!refreshed) {
+			// Refresh abgelehnt (Token widerrufen, Konto deaktiviert, Grant
+			// entzogen) — die Sitzung ist damit beendet.
+			return { state: 'unauthenticated', session: null, setCookie: null }
+		}
+		session = refreshed
+		refreshedCookie = await encryptSession(session, config.sessionKey)
+	}
+
+	const setCookie = refreshedCookie
+		? serializeCookie(SESSION_COOKIE, refreshedCookie, {
+				maxAge: SESSION_MAX_AGE_SECONDS,
+				secure,
+			})
+		: null
+
+	// Die Berechtigung kommt HIER her, bei jeder Anfrage frisch aus ZITADEL —
+	// nicht aus dem Cookie. Ein entzogener Grant wirkt damit sofort und nicht
+	// erst, wenn irgendein Abbild altert.
+	//
+	// Faellt die Abfrage aus, wird VERWEIGERT statt durchgewunken: ZITADEL
+	// laeuft im selben Cluster, ist es weg, kommt ohnehin niemand mehr an
+	// irgendetwas heran. Ein `unauthenticated` schickt die Person dann in die
+	// Anmeldung, wo sie denselben Ausfall sieht — ehrlicher als eine Seite,
+	// die sie eigentlich nicht sehen duerfte.
+	session.roles = await rolesForUser(session.sub)
+
+	// `canRead` und nicht `includes(requiredRole)`: wer `admin` hat, darf lesen,
+	// auch wenn beim Grant der Haken bei `mitglied` fehlt. Sonst sperrt genau
+	// diese Vergesslichkeit die Person aus, die verwalten soll.
+	if (!canRead(session.roles, config.requiredRole)) {
+		return { state: 'unauthorized', session, setCookie }
+	}
+
+	return { state: 'ok', session, setCookie }
+}
+
+/**
+ * Prüft eine Anfrage und liefert entweder eine Antwort, die statt der Seite
+ * ausgeliefert werden muss, oder die Sitzung, mit der gerendert werden darf.
+ */
+export const authenticate = async (
+	request: Request,
+	options: { className: string; contactMail: string },
+): Promise<AuthOutcome> => {
+	const outcome = await resolveSession(request)
+
+	if (outcome.state === 'unauthenticated') {
+		return {
+			response: await unauthenticated(request),
+			session: null,
+			setCookie: null,
+		}
+	}
+
+	if (outcome.state === 'unauthorized') {
+		const response = new Response(
+			notAMemberPage(
+				outcome.session?.email ?? '',
+				options.className,
+				options.contactMail,
+			),
+			{ status: 403, headers: { 'Content-Type': 'text/html; charset=utf-8' } },
+		)
+		if (outcome.setCookie) {
+			response.headers.append('Set-Cookie', outcome.setCookie)
+		}
+		return { response, session: null, setCookie: null }
+	}
+
+	return {
+		response: null,
+		session: outcome.session,
+		setCookie: outcome.setCookie,
+	}
+}
+
+export { SESSION_COOKIE }

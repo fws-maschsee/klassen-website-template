@@ -1,0 +1,54 @@
+# OIDC-Zugangsdaten dieser Klasse und der Schluessel des Sitzungs-Cookies.
+#
+# DIESE DATEI IST EIN GERUEST. Die Werte unter `encryptedData` sind
+# Platzhalter und funktionieren nicht — sie MUESSEN vor dem ersten Deploy
+# durch echte, fuer DIESEN Namespace verschluesselte Werte ersetzt werden.
+#
+# Warum sie nicht mitgeliefert werden koennen: Ein SealedSecret ist fuer genau
+# einen Namen in genau einem Namespace und fuer genau einen Cluster
+# verschluesselt. Das Chiffrat einer anderen Klasse ist hier wertlos, und der
+# sealed-secrets-Controller lehnt es ab.
+#
+# So erzeugt man sie (kubeseal, mit dem oeffentlichen Schluessel des Clusters —
+# dafuer braucht es KEINEN Cluster-Zugriff, nur die Zertifikatsdatei):
+#
+#   OIDC_CLIENT_ID     Client-ID des OIDC-Clients im ZITADEL-Projekt
+#                      `{{ repo_name }}`.
+#   OIDC_CLIENT_SECRET zugehoeriges Client-Secret.
+#   SESSION_SECRET     Schluessel des Sitzungs-Cookies, frisch gewuerfelt:
+#                      `openssl rand -base64 32`.
+#
+#   kubectl create secret generic {{ repo_name }}-oidc \
+#     --namespace {{ repo_name }} --dry-run=client -o yaml \
+#     --from-literal=OIDC_CLIENT_ID="..." \
+#     --from-literal=OIDC_CLIENT_SECRET="..." \
+#     --from-literal=SESSION_SECRET="$(openssl rand -base64 32)" \
+#   | kubeseal --format yaml --cert sealed-secrets-public-key.pem \
+#   > deploy/overlays/production/sealed-oidc.yaml
+#
+# Der OIDC-Client selbst wird im ZITADEL-Projekt dieser Klasse angelegt (per
+# API, Identity-Content — er wird in keinem Repository nachgehalten). Seine
+# redirect_uri muss ZEICHENGENAU `https://{{ site_domain }}/auth/callback`
+# lauten.
+#
+# Fehlen diese Werte, antwortet die App auf geschuetzten Pfaden mit HTTP 503,
+# statt ungeschuetzt auszuliefern. Der Klassenkalender unter /public/ bleibt
+# davon unberuehrt.
+---
+apiVersion: bitnami.com/v1alpha1
+kind: SealedSecret
+metadata:
+  creationTimestamp: null
+  name: {{ repo_name }}-oidc
+  namespace: {{ repo_name }}
+spec:
+  encryptedData:
+    OIDC_CLIENT_ID: PLATZHALTER-MIT-KUBESEAL-ERSETZEN
+    OIDC_CLIENT_SECRET: PLATZHALTER-MIT-KUBESEAL-ERSETZEN
+    SESSION_SECRET: PLATZHALTER-MIT-KUBESEAL-ERSETZEN
+  template:
+    metadata:
+      creationTimestamp: null
+      name: {{ repo_name }}-oidc
+      namespace: {{ repo_name }}
+    type: Opaque

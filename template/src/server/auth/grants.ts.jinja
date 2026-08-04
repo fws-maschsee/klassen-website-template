@@ -1,0 +1,229 @@
+/**
+ * Berechtigungen zur LAUFZEIT bei ZITADEL erfragen.
+ *
+ * Das ist die einzige Quelle dafuer, was jemand darf — fuer die Website wie
+ * fuer den MCP-Server. Weder das Sitzungs-Cookie noch das MCP-Bearer-Token
+ * tragen Rollen; beide sagen nur, WER da ist.
+ *
+ * Warum keine Claims im Token, obwohl das der uebliche Weg waere: Claims
+ * existieren, um die Nachfrage zu vermeiden. Sie sind die richtige Antwort,
+ * wenn der Autorisierungsdienst weit weg, langsam oder ueberlastet ist.
+ * ZITADEL laeuft hier im selben Cluster, die Anfrage kostet Millisekunden,
+ * und die Seite hat ein paar Dutzend Aufrufe pro Stunde. Man kauft sich mit
+ * Claims also nichts ausser veraltetem Zustand — und der ist kein neutraler
+ * Preis: Er muss dokumentiert, abgesichert und irgendwann gedebuggt werden.
+ *
+ * Konkret gemessen an dem Fehler, der zu dieser Datei gefuehrt hat: Ein
+ * MCP-Token trug die Rollen von seiner Ausstellung. Ein HINZUGEFUEGTES Recht
+ * kam nie an — aergerlich. Ein ENTZOGENES Recht verschwand nie — nicht
+ * haltbar in einem System, in dem eine Elternvertretung wechselt und Familien
+ * die Schule verlassen. Genau das gab es an anderer Stelle schon: in der
+ * abgeloesten PocketBase-Gruppe hatten sechs Personen weiterhin Zugriff, die
+ * laengst nicht mehr dazugehoerten.
+ *
+ * Bei einer Stoerung wird VERWEIGERT, nicht durchgewunken. Ist ZITADEL nicht
+ * erreichbar, kommt ohnehin niemand mehr an irgendetwas heran — ein
+ * fehlschlagender Aufruf ist dann das erwartete Verhalten und kein Ausfall,
+ * den man umgehen muesste.
+ */
+
+/** Konfiguration fehlt oder ist unvollstaendig — ein Betriebsfehler. */
+export class GrantsConfigError extends Error {}
+
+/** ZITADEL war nicht erreichbar oder hat abgelehnt. Fuehrt zu Verweigerung. */
+export class GrantsUnavailableError extends Error {}
+
+const readEnv = (name: string): string => (process.env[name] ?? '').trim()
+
+export type GrantsConfig = {
+	issuer: string
+	orgId: string
+	projectId: string
+	token: string
+}
+
+let cachedConfig: GrantsConfig | null = null
+
+export const getGrantsConfig = (): GrantsConfig => {
+	if (cachedConfig) return cachedConfig
+	const issuer =
+		readEnv('ZITADEL_ISSUER') ||
+		readEnv('OIDC_ISSUER') ||
+		'{{ oidc_issuer }}'
+	const orgId = readEnv('ZITADEL_ORG_ID')
+	const projectId = readEnv('ZITADEL_PROJECT_ID')
+	const token = readEnv('ZITADEL_SERVICE_TOKEN')
+
+	const missing = [
+		orgId ? null : 'ZITADEL_ORG_ID',
+		projectId ? null : 'ZITADEL_PROJECT_ID',
+		token ? null : 'ZITADEL_SERVICE_TOKEN',
+	].filter(Boolean)
+	if (missing.length > 0) {
+		throw new GrantsConfigError(
+			`Berechtigungspruefung nicht konfiguriert, es fehlt: ${missing.join(', ')}`,
+		)
+	}
+	cachedConfig = {
+		issuer: issuer.replace(/\/$/, ''),
+		orgId,
+		projectId,
+		token,
+	}
+	return cachedConfig
+}
+
+/** Nur fuer Tests. */
+export const resetGrantsConfig = (): void => {
+	cachedConfig = null
+	cache = null
+}
+
+const ACTIVE_STATE = 'USER_GRANT_STATE_ACTIVE'
+
+type GrantRow = {
+	userId?: string
+	roleKeys?: string[]
+	state?: string
+	email?: string
+	firstName?: string
+	lastName?: string
+	displayName?: string
+}
+
+/**
+ * Nur AKTIVE Grants zaehlen. Bewusst ein exakter Vergleich und kein
+ * `endsWith('ACTIVE')` — daran ist genau diese Pruefung schon einmal
+ * gescheitert, weil `USER_GRANT_STATE_INACTIVE` ebenfalls auf "ACTIVE" endet
+ * und ein deaktivierter Grant damit weiter Zugang gegeben haette.
+ */
+const isActive = (row: GrantRow): boolean =>
+	(row.state ?? ACTIVE_STATE) === ACTIVE_STATE
+
+const search = async (
+	queries: unknown[],
+	limit = 1000,
+): Promise<GrantRow[]> => {
+	const config = getGrantsConfig()
+	let response: Response
+	try {
+		response = await fetch(
+			`${config.issuer}/management/v1/users/grants/_search`,
+			{
+				method: 'POST',
+				headers: {
+					authorization: `Bearer ${config.token}`,
+					'x-zitadel-orgid': config.orgId,
+					'content-type': 'application/json',
+				},
+				body: JSON.stringify({ query: { limit }, queries }),
+			},
+		)
+	} catch (error) {
+		throw new GrantsUnavailableError(
+			`ZITADEL nicht erreichbar: ${(error as Error).message}`,
+		)
+	}
+	if (!response.ok) {
+		throw new GrantsUnavailableError(
+			`ZITADEL antwortete mit HTTP ${response.status}`,
+		)
+	}
+	const body = (await response.json()) as { result?: GrantRow[] }
+	return body.result ?? []
+}
+
+/**
+ * Kurzlebiger Zwischenspeicher der Grants DIESES Projekts.
+ *
+ * Gemessen und nicht vorsorglich: ein Seitenaufruf loest eine Pruefung aus,
+ * ein MCP-Werkzeugaufruf ebenfalls — aber ein Client, der in einem Zug
+ * `tools/list` und drei `tools/call` schickt, fragt sonst viermal dasselbe.
+ * Fuenf Sekunden sind kurz genug, dass ein Entzug praktisch sofort wirkt, und
+ * lang genug, um ein Buendel abzufangen.
+ *
+ * Zwischengespeichert wird die ganze Projektliste und nicht die Antwort pro
+ * Person: die Klasse hat rund 55 Grants, das ist eine Anfrage statt 55, und
+ * dieselbe Liste bedient auch den Empfaenger-Abgleich.
+ *
+ * Der Speicher liegt im Prozess. Das ist zulaessig, weil dieser Dienst
+ * ausdruecklich mit EINER Replik laeuft (server-config, AGENTS.md
+ * Invariante 8).
+ */
+const CACHE_TTL_MS = 5000
+let cache: { at: number; rows: GrantRow[] } | null = null
+
+/** Nur fuer Tests. */
+export const clearGrantsCache = (): void => {
+	cache = null
+}
+
+/**
+ * Alle aktiven Grants im Projekt dieser Instanz.
+ *
+ * Bewusst NUR nach `projectId` gefragt und dann im Speicher gefiltert.
+ * `userIdQuery` waere die naheliegende Einschraenkung — sie liefert gegen
+ * diese Instanz aber zuverlaessig NULL Zeilen, auch fuer Personen, die in
+ * derselben Antwort per `projectIdQuery` sehr wohl auftauchen. Gemessen mit
+ * zwei verschiedenen Zugangsdaten. Auf eine Abfrageform zu bauen, die still
+ * das falsche Ergebnis liefert, hiesse hier: niemand darf mehr etwas, und
+ * niemand sieht warum.
+ */
+const projectGrants = async (): Promise<GrantRow[]> => {
+	if (cache && Date.now() - cache.at < CACHE_TTL_MS) return cache.rows
+	const config = getGrantsConfig()
+	const rows = (
+		await search([{ projectIdQuery: { projectId: config.projectId } }])
+	).filter(isActive)
+	cache = { at: Date.now(), rows }
+	return rows
+}
+
+/**
+ * Die Projektrollen dieser Person — frisch aus ZITADEL.
+ *
+ * Nur Rollen aus AKTIVEN Grants des Projekts dieser Instanz. Ein Grant in
+ * einer anderen Klasse taucht hier gar nicht auf, genau wie ein Rollen-Claim
+ * nur die Rollen seines Projekts traegt.
+ */
+export const rolesForUser = async (userId: string): Promise<string[]> => {
+	if (!userId) return []
+	const rows = await projectGrants()
+	return [
+		...new Set(
+			rows
+				.filter((row) => row.userId === userId)
+				.flatMap((row) => row.roleKeys ?? []),
+		),
+	]
+}
+
+/** Eine Person mit Grant im Projekt dieser Klasse. */
+export type GrantedUser = {
+	userId: string
+	email: string
+	firstName: string
+	lastName: string
+	roles: string[]
+}
+
+/**
+ * Alle Personen, die im Projekt dieser Klasse die genannte Rolle haben.
+ *
+ * Grundlage der Listenempfaenger: wer den Grant hat, ist erreichbar — ohne
+ * zweiten Handgriff in einer eigenen Tabelle. Bewusst NICHT zwischengespeichert:
+ * der Aufruf passiert beim Abgleich, nicht pro Anfrage.
+ */
+export const usersWithRole = async (role: string): Promise<GrantedUser[]> => {
+	const rows = await projectGrants()
+	return rows
+		.filter((row) => (row.roleKeys ?? []).includes(role))
+		.filter((row) => Boolean(row.userId) && Boolean(row.email))
+		.map((row) => ({
+			userId: row.userId as string,
+			email: (row.email as string).trim().toLowerCase(),
+			firstName: row.firstName ?? '',
+			lastName: row.lastName ?? row.displayName ?? '',
+			roles: row.roleKeys ?? [],
+		}))
+}

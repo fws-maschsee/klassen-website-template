@@ -1,0 +1,33 @@
+# Lokales Ausprobieren des Produktions-Images.
+#
+# Die Anmeldung läuft über das zentrale ZITADEL der Schule
+# ({{ oidc_issuer }}) und braucht deshalb keinen Dienst daneben. Ohne
+# OIDC_CLIENT_ID/OIDC_CLIENT_SECRET/SESSION_SECRET antwortet die App auf
+# geschützten Pfaden mit HTTP 503; der Klassenkalender unter /public/ bleibt
+# auch dann erreichbar.
+#
+# Seit der Mitgliederverwaltung speichert die Anwendung sehr wohl eigene Daten:
+# Namen und E-Mail-Adressen der Eltern liegen in einer SQLite-Datei auf dem
+# Volume unter /data. Die gehört NICHT ins Image und NICHT ins Git-Repo.
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      - PORT=3000
+      - PUBLIC_BASE_URL=http://localhost:3000
+      # Ohne SES-Zugangsdaten läuft alles außer dem tatsächlichen Versand;
+      # Mails bleiben dann als `error` in der Warteschlange stehen.
+      - SES_SMTP_USER=${SES_SMTP_USER:-}
+      - SES_SMTP_PASSWORD=${SES_SMTP_PASSWORD:-}
+      # Ohne dieses Geheimnis weist die App jede eingehende Listenmail mit 401
+      # ab. Muss mit dem Cloudflare-Email-Worker übereinstimmen.
+      - LIST_WEBHOOK_SECRET=${LIST_WEBHOOK_SECRET:-}
+    ports:
+      - "3000:3000"
+    volumes:
+      - {{ repo_name }}-data:/data
+
+volumes:
+  {{ repo_name }}-data:

@@ -1,53 +1,106 @@
-# Zweistufiger Build: bauen mit allen Abhängigkeiten, ausliefern nur mit den
-# Produktions-Abhängigkeiten.
+# better-sqlite3 ist ein natives Modul. Auf Alpine (musl) gibt es nicht für
+# jede Node-Version ein fertiges Prebuild, deshalb liegen die Build-Tools in
+# den Stages, die `npm ci` ausführen.
 FROM node:22-alpine AS builder
+
+RUN apk add --no-cache python3 make g++
 
 WORKDIR /app
 
-# Erst nur die Manifeste kopieren, damit die npm-Schicht im Cache bleibt,
-# solange sich die Abhängigkeiten nicht ändern.
 COPY package.json package-lock.json ./
 
-# `npm ci`, nicht `npm install`: Die Lockfile entscheidet, welche Versionen
-# gebaut werden. Ein `npm install` würde die Ranges neu auflösen, und das Image
-# enthielte etwas anderes als der geprüfte Build.
 RUN npm ci
 
 COPY . .
 
 RUN npm run build
 
+# Produktionsabhängigkeiten in einer eigenen Stage, damit weder
+# devDependencies noch ein npm-Cache je im Endbild landen.
+#
+# Installiert wird mit `npm ci` gegen das Lockfile, nicht mit `npm install`.
+# `npm install` löste hier ohne Lockfile vollständig neu auf: die `^`-Bereiche
+# (astro, @astrojs/*) hätten dann jederzeit andere Versionen ziehen können als
+# der Build in der builder-Stage. In einer der Referenzklassen ist genau das
+# eskaliert: dort standen die @levino/*-Pakete auf `*`, ein frisches Auflösen
+# zog Shipyard 0.8 mit einem Peer auf astro ^6, und der Install im Runner brach
+# an einem Peer-Konflikt ab.
+FROM node:22-alpine AS prod-deps
+
+RUN apk add --no-cache python3 make g++
+
+WORKDIR /app
+
+COPY package.json package-lock.json ./
+
+RUN npm ci --omit=dev && npm cache clean --force
+
 FROM node:22-alpine AS runner
+
+RUN apk add --no-cache ca-certificates
 
 WORKDIR /app
 
 ENV NODE_ENV=production
-# `::` bindet dual-stack (IPv4 und IPv6).
 ENV HOST=::
 ENV PORT=3000
 
-# Auth-Konfiguration. Diese beiden Variablen werden zur Laufzeit von nichts
-# gelesen - die wirksamen Werte stehen in src/site.config.ts und werden in
-# src/middleware.ts direkt übergeben. Sie stehen hier als Dokumentation der
-# erwarteten Umgebung. Wer sie ändert, ändert am laufenden Betrieb nichts.
+# Anmeldung: OIDC gegen das zentrale ZITADEL der Schule.
 #
-# AUTH_POCKETBASE_GROUP muss dem Gruppennamen im Auth-Backend entsprechen.
-# Einseitig ändern sperrt alle Eltern aus - siehe src/site.config.ts.
-ENV AUTH_POCKETBASE_URL={{ auth_pocketbase_url }}
-ENV AUTH_POCKETBASE_GROUP={{ auth_group }}
+# Diese Werte sind öffentlich. OIDC_REQUIRED_ROLE muss zu AUTH_ROLE in
+# src/site.config.ts passen; dort steht auch, warum beide Klassen dieselbe
+# Rolle `mitglied` benutzen dürfen, ohne sich gegenseitig aufzusperren.
+ENV OIDC_ISSUER={{ oidc_issuer }}
+ENV OIDC_REQUIRED_ROLE=mitglied
+ENV AUTH_PROVIDER=zitadel
 
-# Build-Artefakte und Server übernehmen. Die Lockfile MUSS mitkopiert werden,
-# sonst kann die Runner-Stufe kein `npm ci` ausführen.
+# Die drei Geheimnisse OIDC_CLIENT_ID, OIDC_CLIENT_SECRET und SESSION_SECRET
+# kommen zur Laufzeit aus dem Secret `{{ repo_name }}-oidc` im Cluster
+# (SealedSecret in deploy/overlays/production/). Fehlen
+# sie, antwortet die App auf geschützten Pfaden mit HTTP 503 statt
+# ungeschützt zu laufen. Der Klassenkalender unter /public/ bleibt davon
+# unberührt und weiter offen — genau das prüft der Smoke-Test im
+# Deploy-Workflow.
+#
+# OIDC_PUBLIC_ORIGIN (die öffentliche Adresse der Seite) wird ebenfalls im
+# Cluster gesetzt, neben dem Ingress, dessen Host sie treffen muss. Fehlt sie,
+# fällt die App auf die Weiterleitungs-Header des Reverse Proxy zurück.
+
+# Instanz-Identität. EIN Deployment PRO KLASSE, jede mit eigener SQLite-Datei.
+# Der Wert wird beim ersten Start in die Datei geschrieben und danach bei jedem
+# Start dagegen geprüft; passt beides nicht zusammen, startet der Server nicht.
+# Er muss außerdem mit `CLASS_SLUG` in email-worker/wrangler.toml
+# übereinstimmen — der Worker schickt die Klasse als `X-List-Class` mit, und
+# die App weist Post einer fremden Klasse ab.
+ENV MCP_INSTANCE_NAME={{ repo_name }}
+ENV MCP_INSTANCE_LABEL="{{ class_display_name }}"
+
+# Die Datenbank liegt auf einem persistenten Volume unter /data — NICHT im
+# Image und niemals im Git-Repo. Sie enthält Namen und E-Mail-Adressen der
+# Eltern.
+ENV DB_PATH=/data/{{ repo_name }}.db
+ENV DATABASE_URL=sqlite:/data/{{ repo_name }}.db
+VOLUME ["/data"]
+
+COPY --from=prod-deps /app/node_modules ./node_modules
+
+# Astro-Build (statische Assets + SSR-Entry im `middleware`-Modus).
 COPY --from=builder /app/dist ./dist
-COPY --from=builder /app/package.json /app/package-lock.json ./
 
-# Nur Produktionsabhängigkeiten installieren - und wieder `npm ci`, nicht
-# `npm install`. Mit `npm install` löst npm die Ranges hier ein zweites Mal
-# auf; das Image bekäme dann andere Versionen als die, gegen die dist/ gebaut
-# wurde. Genau daran ist der Server schon einmal gestorben.
-RUN npm ci --omit=dev
+# Zur Laufzeit gelesenes TypeScript: server.ts lädt src/server/** und transitiv
+# src/lib/**; ausgeführt wird es über tsx. Dazu die Migrations (dbmate) und die
+# Rundmail-Inhalte, die der Loader zur Laufzeit importiert.
+COPY --from=builder /app/server.ts ./server.ts
+COPY --from=builder /app/src ./src
+COPY --from=builder /app/db ./db
+COPY --from=builder /app/emails ./emails
+COPY --from=builder /app/package.json /app/package-lock.json ./
+COPY --from=builder /app/tsconfig.json ./tsconfig.json
 
 EXPOSE 3000
 
-# Astro-SSR-Server auf allen Interfaces starten.
-CMD ["node", "./dist/server/entry.mjs", "--host", "0.0.0.0", "--port", "3000"]
+# Erst Schema aktualisieren, dann starten. `npm start` fährt Express hoch:
+# Astro-Seiten, MCP-Endpunkt, OAuth-Routen und der Queue-Worker in einem
+# Prozess. Der Astro-Adapter läuft im `middleware`-Modus, deshalb wird NICHT
+# mehr `node dist/server/entry.mjs` gestartet.
+CMD ["sh", "-c", "node_modules/.bin/dbmate --migrations-dir /app/db/migrations up && npm start"]

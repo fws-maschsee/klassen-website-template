@@ -1,0 +1,97 @@
+import type { Database } from 'better-sqlite3'
+import { openDb } from './index.js'
+
+/**
+ * Instanz-Identitaet: welche KLASSE ist das hier?
+ *
+ * Es gibt ein Deployment pro Klasse (`{{ repo_name }}`, die Nachbarklassen
+ * jeweils unter ihrem eigenen Namen) mit jeweils eigener SQLite-Datei. Das ist Absicht: Die Eltern der einen
+ * Klasse sollen in den Daten der anderen strukturell nicht auftauchen koennen.
+ *
+ * Damit dieser Schutz nicht an einer falsch gesetzten Env-Variable haengt,
+ * gibt es zwei Quellen, die zusammenpassen muessen:
+ *
+ *   1. `MCP_INSTANCE_NAME` — was das DEPLOYMENT zu sein glaubt.
+ *   2. `app_meta.instance` — was in der DATEI steht. Wird beim ersten Start
+ *      einmalig aus (1) geschrieben und danach nie wieder veraendert.
+ *
+ * Weichen beide voneinander ab, ist entweder die falsche Datei gemountet oder
+ * die falsche Env gesetzt. In beiden Faellen ist der naechste Versand ein
+ * Versand in die falsche Klasse — deshalb faehrt der Server dann gar nicht
+ * erst hoch (`assertInstanceMatches`).
+ */
+
+/** Fallback-Name, wenn keine Instanz per Env konfiguriert ist. */
+export const DEFAULT_INSTANCE_NAME = '{{ repo_name }}'
+
+const META_KEY = 'instance'
+
+/** Technischer Instanz-/Servername (MCP `name`), aus der Env. */
+export const instanceName = (): string =>
+	process.env.MCP_INSTANCE_NAME?.trim() || DEFAULT_INSTANCE_NAME
+
+/** Menschlich lesbares Label fuer die Anzeige im MCP-Client. */
+export const instanceLabel = (): string =>
+	process.env.MCP_INSTANCE_LABEL?.trim() || instanceName()
+
+/** Der in der DB-Datei hinterlegte Instanzname, oder `null` wenn noch keiner. */
+export const getRecordedInstance = (db: Database = openDb()): string | null =>
+	db
+		.prepare<[string], { value: string }>(
+			'SELECT value FROM app_meta WHERE key = ?',
+		)
+		.get(META_KEY)?.value ?? null
+
+/**
+ * Schreibt den Instanznamen in die Datei, falls noch keiner drinsteht.
+ * Ueberschreibt NIE einen bestehenden Wert — ein bestehender Wert ist die
+ * Wahrheit ueber die Datei, die Env ist nur eine Behauptung darueber.
+ */
+export const recordInstanceIfEmpty = (
+	name: string = instanceName(),
+	db: Database = openDb(),
+): string => {
+	const existing = getRecordedInstance(db)
+	if (existing) return existing
+	db.prepare<[string, string]>(
+		'INSERT INTO app_meta (key, value) VALUES (?, ?)',
+	).run(META_KEY, name)
+	return name
+}
+
+export type InstanceCheck = {
+	/** Name aus der Env (`MCP_INSTANCE_NAME`). */
+	configured: string
+	/** Name aus der DB-Datei (`app_meta.instance`), `null` bei frischer Datei. */
+	recorded: string | null
+	/** `false` nur, wenn beide gesetzt sind und sich unterscheiden. */
+	ok: boolean
+}
+
+export const checkInstance = (db: Database = openDb()): InstanceCheck => {
+	const configured = instanceName()
+	const recorded = getRecordedInstance(db)
+	return {
+		configured,
+		recorded,
+		ok: recorded === null || recorded === configured,
+	}
+}
+
+/**
+ * Bootstrap-Pruefung fuer den Serverstart: schreibt den Namen in eine frische
+ * Datei und wirft, wenn eine bestehende Datei zu einer anderen Klasse gehoert.
+ */
+export const assertInstanceMatches = (
+	db: Database = openDb(),
+): InstanceCheck => {
+	const check = checkInstance(db)
+	if (!check.ok) {
+		throw new Error(
+			`Instanz-Konflikt: Die Datenbank gehoert zu "${check.recorded}", das Deployment ist aber als "${check.configured}" konfiguriert (MCP_INSTANCE_NAME). ` +
+				'Entweder ist das falsche Volume gemountet oder die falsche Env gesetzt. Start abgebrochen, um Versand in die falsche Klasse zu verhindern.',
+		)
+	}
+	recordInstanceIfEmpty(check.configured, db)
+	return check
+}

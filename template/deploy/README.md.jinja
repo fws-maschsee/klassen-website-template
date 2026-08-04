@@ -1,49 +1,120 @@
-# Deployment
+# Deployment der {{ class_display_name }}
 
-Diese beiden Manifeste beschreiben, wie die Website im k3s-Cluster läuft. Sie
-werden **nicht von hier aus** angewandt.
+Die Kubernetes-Manifeste dieser Klasse liegen **hier**, in
+`overlays/production/`, und nicht im GitOps-Repository
+[{{ gitops_repo }}](https://github.com/{{ gitops_repo }}). Dort liegt nur noch
+die Argo-CD-`Application`, die hierher zeigt.
 
-## Wie es zusammenhängt
+Warum: Der `GITHUB_TOKEN` eines Workflows darf nicht in ein fremdes Repository
+schreiben. Läge das Overlay im GitOps-Repo, müsste der Image-Tag dort **von
+Hand** nachgezogen werden — und genau das wurde regelmäßig vergessen.
 
-```
-1. dieses Repo, push auf main
-     → Deploy-Workflow: Image bauen (nativ), starten, prüfen,
-       nach ghcr.io pushen, Tag in der Zusammenfassung nennen
+## Wie ein Rollout abläuft
 
-2. {{ gitops_repo }}
-     → apps/{{ repo_name }}/kustomization.yaml: newTag von Hand eintragen
+1. Merge auf `main`.
+2. `.github/workflows/deploy.yml` baut das Image auf einem **nativen**
+   {{ target_arch }}-Runner (nie QEMU), startet es unter Cluster-Bedingungen
+   zur Probe (`--user 1000:1000 --read-only --tmpfs /tmp --tmpfs /data`) und
+   pusht es erst danach nach `ghcr.io/{{ github_org }}/{{ repo_name }}`.
+3. Derselbe Workflow pinnt `overlays/production/kustomization.yaml` auf den
+   unveränderlichen `:<sha>`-Tag und pusht den Baum force auf den Branch
+   **`production`**.
+4. Argo CD verfolgt `production`, zieht das geänderte Overlay und rollt aus.
 
-3. Cluster
-     → Argo CD sieht die Änderung und rollt aus
-```
+`production` ist kein Arbeitsbranch. Er wird bei jedem Deploy überschrieben und
+trägt „Baum von `main` + gepinnter Image-Tag". **Von Hand fasst ihn niemand
+an.**
 
-## Einmalig einrichten
+Niemals `latest` als Deploy-Tag eintragen: Nur ein unveränderlicher Tag
+beantwortet die Frage, welcher Quelltext gerade läuft — und
+`imagePullPolicy: IfNotPresent` zieht neue `latest`-Stände ohnehin nicht.
 
-1. Den Inhalt dieses Ordners nach `apps/{{ repo_name }}/` in
-   [{{ gitops_repo }}](https://github.com/{{ gitops_repo }}) kopieren
-   (`app.yaml` und `kustomization.yaml`, diese README bleibt hier).
-2. `apps/{{ repo_name }}` in `apps/kustomization.yaml` dort eintragen.
-3. DNS: `{{ site_domain }}` muss auf den Cluster zeigen. Bei einem
-   Wildcard-Eintrag `*.{{ base_domain }}` ist nichts zu tun.
-4. Die Benutzergruppe `{{ auth_group }}` in PocketBase
-   ({{ auth_pocketbase_url }}) anlegen und die Eltern eintragen. Ohne sie
-   antwortet die Seite jedem mit 401.
-5. Das GHCR-Paket `{{ github_org }}/{{ repo_name }}` auf **privat** stellen und
-   dem Cluster-Knoten Lesezugriff geben
-   (`/etc/rancher/k3s/registries.yaml`).
+## Was einmalig eingerichtet werden muss
 
-## Bei jedem Rollout
+Diese Schritte liegen **außerhalb** dieses Repositories. Ohne sie läuft die
+Klassenseite nicht.
 
-Der Deploy-Workflow schreibt den zu setzenden Tag in seine Zusammenfassung.
-Diesen Tag in `apps/{{ repo_name }}/kustomization.yaml` unter `newTag`
-eintragen und pushen. Mehr passiert nicht - Argo CD erledigt den Rest.
+### 1. ZITADEL: Projekt, Rollen, OIDC-Client
 
-### Warum kein automatischer Tag-Bump
+Im zentralen ZITADEL ({{ oidc_issuer }}) braucht diese Klasse ein **eigenes
+Projekt**. Aus der Projektzuordnung — nicht aus dem Rollennamen — entsteht die
+Trennung der Klassen voneinander: Ein Token trägt nur die Rollen des Projekts,
+zu dem der OIDC-Client gehört.
 
-Das GITHUB_TOKEN eines Workflows kann nicht in ein anderes Repository
-schreiben. Ein Deploy-Key oder PAT mit Schreibrecht auf das GitOps-Repository
-wäre ein dauerhaftes Geheimnis in einem Klassen-Repository, das nebenbei von
-Eltern über die GitHub-Oberfläche bearbeitet wird. Der Handgriff ist eine
-Zeile; das Geheimnis wäre für immer. Wer die Automatisierung trotzdem will,
-nimmt Argo CD Image Updater - der läuft im Cluster und braucht kein Token in
-diesem Repository.
+Anzulegen sind:
+
+- ein Projekt für diese Klasse,
+- die Rollen `mitglied` (lesen) und `admin` (pflegen und senden),
+- ein OIDC-Client mit der redirect_uri **zeichengenau**
+  `https://{{ site_domain }}/auth/callback`,
+- die Grants der Eltern auf `mitglied`.
+
+Die IDs von Organisation und Projekt kommen in
+`overlays/production/deployment.yaml` (`ZITADEL_ORG_ID`,
+`ZITADEL_PROJECT_ID`).
+
+Projekt, Rollen, Client und Grants sind **Identity-Content**. Sie werden über
+die ZITADEL-API gepflegt und in **keinem** Repository nachgehalten — auch nicht
+hier.
+
+### 2. Die drei Secrets
+
+`overlays/production/sealed-oidc.yaml` und `sealed-mail.yaml` kommen als
+**Gerüst** aus der Vorlage. Die Werte darin sind Platzhalter und funktionieren
+nicht. Ein SealedSecret ist für genau einen Namen in genau einem Namespace und
+für genau einen Cluster verschlüsselt; das Chiffrat einer anderen Klasse ist
+hier wertlos.
+
+Erzeugt werden sie mit `kubeseal` gegen den **öffentlichen** Schlüssel des
+Clusters — dafür braucht es keinen Cluster-Zugriff, nur die Zertifikatsdatei.
+Die genauen Kommandos stehen als Kommentar in den beiden Dateien.
+
+`ZITADEL_SERVICE_TOKEN` (der PAT eines **nur lesenden** Machine-Users, für den
+Adressbuch-Abgleich) ist dagegen ein **Infrastruktur-Credential**. Es gehört
+weder ins Repository noch in ein SealedSecret, sondern wird von Hand als Secret
+`{{ repo_name }}-zitadel` im Namespace angelegt und muss beim Neuaufbau des
+Clusters neu erzeugt werden.
+
+### 3. DNS
+
+`{{ site_domain }}` muss auf den Cluster zeigen. Liegt ein Wildcard-Eintrag
+`*.{{ base_domain }}` vor, ist nichts zu tun.
+
+### 4. Argo-CD-`Application`
+
+Im GitOps-Repository [{{ gitops_repo }}](https://github.com/{{ gitops_repo }})
+wird eine `Application` angelegt, die auf dieses Repository zeigt:
+
+- `repoURL`: `https://github.com/{{ github_org }}/{{ repo_name }}`
+- `targetRevision`: `production`
+- `path`: `deploy/overlays/production`
+
+Ist dieses Repository privat, muss Argo CD es lesen können — bei
+{{ github_org }} über eine org-weit installierte GitHub App, als `repo-creds`
+im Namespace `argocd` hinterlegt.
+
+### 5. Mailinglisten (optional)
+
+Der Cloudflare-Worker in `../email-worker/` wird über die **GitHub-Integration**
+von Cloudflare aus `main` gebaut, nie von Hand. Siehe
+[`../email-worker/README.md`](../email-worker/README.md).
+
+## Das GHCR-Paket bleibt privat
+
+`astro build` kompiliert `src/content/` — Berichte, Elternabend-Protokolle,
+Unterlagen — in das Image hinein. Ein öffentliches Paket würde genau das
+veröffentlichen, was der Login schützt. Der Cluster zieht das Image über einen
+knotenweiten Credential in `/etc/rancher/k3s/registries.yaml`; ein CI-Token
+taugt dafür nicht, es läuft mit dem Workflow ab und die Pods landen Wochen
+später in `ImagePullBackOff`.
+
+## Das persistente Volume
+
+`overlays/production/pvc.yaml` hält `/data` — die SQLite-Datei mit Adressbuch,
+Gruppen, Listen, Versandjournal und den MCP-Autorisierungen. Ohne dieses Volume
+ist nach jedem Pod-Neustart alles weg, einschließlich der in der Datei
+festgeschriebenen Instanz-Identität.
+
+**Achtung bei `local-path`:** Die `reclaimPolicy` ist `Delete`. Wird das PVC
+gelöscht, ist der Inhalt weg. Ein Backup ist ein `kubectl cp` der Datei — und es
+gehört NICHT ins Git-Repo, es enthält personenbezogene Daten.

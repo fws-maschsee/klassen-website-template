@@ -1,21 +1,40 @@
 name: Deploy
 
-# Bauen und ins Register schieben - mehr nicht. Dieser Workflow hat KEINEN
-# Cluster-Zugriff: kein kubectl, kein KUBECONFIG, kein id-token, kein Token mit
-# Schreibrecht in anderen Repositories. Ausgerollt wird über GitOps: Der
-# Image-Tag wird in {{ gitops_repo }} festgeschrieben, Argo CD gleicht ab.
-#
-# Gebaut wird auf einem NATIVEN Runner der Zielarchitektur, nie unter QEMU.
-#
-# Das GHCR-Paket bleibt PRIVAT. `astro build` kompiliert src/content/ - also
-# Berichte, Elternabend-Protokolle und Unterlagen - in das Image hinein. Ein
-# öffentliches Paket würde genau das veröffentlichen, was der Login schützt.
-{% raw %}
 on:
   push:
     branches: [main]
   workflow_dispatch:
 
+# Variante B (GitOps, wie die uebrigen Klassenseiten der Schule):
+#   1. Bauen auf NATIVEN Runnern pro Architektur, Push per Digest — niemals
+#      QEMU. Die Matrix hat genau einen Eintrag, naemlich die Architektur des
+#      Cluster-Nodes ({{ target_arch }}); eine zweite
+#      waere eine Zeile mehr, das Digest-Merge unten kann das bereits.
+#   2. Digests mit `docker buildx imagetools create` zu einem Manifest
+#      zusammenfuehren.
+#   3. Das eigene Overlay unter deploy/overlays/production/ auf den soeben
+#      gebauten, unveraenderlichen `:<sha>`-Tag pinnen und das Ergebnis auf den
+#      Branch `production` veroeffentlichen (Job `deploy` unten). Argo CD liest
+#      genau diesen Branch — ein Merge auf `main` rollt damit wirklich aus.
+#
+# Kein Cluster-Zugriff: kein kubectl, kein KUBECONFIG, kein id-token, kein
+# Write-back-PAT.
+#
+# Das Overlay gehoert bewusst HIERHER und nicht ins GitOps-Repo: Der
+# GITHUB_TOKEN eines Workflows darf nicht in ein fremdes Repository schreiben,
+# ein dort liegendes Overlay muesste also VON HAND gepinnt werden. Das
+# GitOps-Repo haelt nur noch die Argo-CD-`Application`, die hierher zeigt.
+# Voraussetzung dafuer ist, dass Argo CD dieses (private) Repo lesen kann —
+# ueber eine org-weit installierte GitHub App, als `repo-creds` mit dem
+# Org-Prefix im Namespace argocd hinterlegt.
+#
+# Das GHCR-Package bleibt PRIVAT: `astro build` kompiliert src/content/
+# (Berichte, Protokolle, Unterlagen) mit ins Image, ein oeffentliches Package
+# wuerde also genau das veroeffentlichen, was der Login schuetzt. Der Cluster
+# zieht es ueber einen node-weiten Credential in
+# /etc/rancher/k3s/registries.yaml.
+
+{% raw %}
 permissions:
   contents: read
   packages: write
@@ -25,28 +44,23 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  # Aus dem GitHub-Kontext statt fest eingetragen: Damit stimmt der Name auch
-  # nach einer Umbenennung des Repositories noch.
-  IMAGE: ghcr.io/${{ github.repository }}
+  IMAGE: ghcr.io/{% endraw %}{{ github_org }}{% raw %}/{% endraw %}{{ repo_name }}{% raw %}
 
 jobs:
   build:
     strategy:
       matrix:
         include:
-{% endraw %}
-{% if target_arch == 'arm64' %}
+{% endraw %}{% if target_arch == 'arm64' %}
           - platform: linux/arm64
             arch: arm64
-            runner: ubuntu-24.04-arm # nativ arm64 - NIEMALS QEMU
+            runner: ubuntu-24.04-arm # nativ arm64 — niemals QEMU
 {% else %}
           - platform: linux/amd64
             arch: amd64
-            runner: ubuntu-latest # nativ amd64 - NIEMALS QEMU
-{% endif %}
-{% raw %}
+            runner: ubuntu-latest # nativ amd64 — niemals QEMU
+{% endif %}{% raw %}
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v5
 
@@ -60,11 +74,9 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # Das Image zuerst in den lokalen Daemon laden, damit es gestartet und
-      # geprüft werden kann, BEVOR irgendetwas im Register landet. Genau das
-      # fängt die Fehlerklasse ab, die erst zur Laufzeit auffällt - etwa eine
-      # Abhängigkeit, die npm unter --omit=dev weggehoistet hat. Der
-      # SSR-Einstiegspunkt ist daran schon einmal gestorben.
+      # Erst lokal laden, damit das Image gestartet und geprueft werden kann,
+      # BEVOR irgendetwas in der Registry landet. Genau diese Stufe hat beim
+      # Aufbau der Referenzklassen mehrere kaputte Images abgefangen.
       - name: Build for local verification
         uses: docker/build-push-action@v6
         with:
@@ -82,33 +94,45 @@ jobs:
 
       - name: Smoke test the image
         run: |
-          # So starten, wie der Cluster es tut: nicht als root, mit
-          # schreibgeschütztem Root-Dateisystem und beschreibbarem /tmp. Bricht
-          # diese Kombination, muss sie hier brechen und nicht als
-          # CrashLoopBackOff auf dem Knoten.
+          # So starten, wie der Cluster es tut: non-root, read-only rootfs,
+          # beschreibbares /tmp. Bricht diese Kombination, muss sie hier
+          # brechen und nicht als CrashLoopBackOff auf dem Node.
+          #
+          # /data ebenfalls beschreibbar, hier als tmpfs. Im Cluster ist das
+          # ein PersistentVolumeClaim; hier genuegt fluechtiger Speicher, weil
+          # der Test nur einen Start prueft. Ohne ihn legt dbmate die
+          # SQLite-Datei auf dem read-only rootfs an und scheitert mit
+          # "unable to open database file", der Server kommt nie hoch und
+          # der Kalender-Check unten meldet 000 statt 200 — was wie ein
+          # Problem der Anmeldung aussieht und keines ist.
           docker run -d --name smoke \
-            --user 1000:1000 --read-only --tmpfs /tmp \
+            --user 1000:1000 --read-only --tmpfs /tmp --tmpfs /data \
             -p 3000:3000 "${IMAGE}:verify"
           CODE=000
           for _ in $(seq 1 30); do
-            # curl gibt bei Verbindungsfehler selbst schon 000 aus. Deshalb
-            # `|| true` und NICHT `|| echo 000` - letzteres ergäbe "000000",
-            # und die Prüfung unten bestünde gegen einen toten Server.
+            # curl gibt selbst schon 000 aus, wenn es nicht verbinden kann —
+            # `|| true` ist deshalb der einzige noetige Fallback. Ein
+            # zusaetzliches `echo 000` wuerde daraus 000000 machen und die
+            # Pruefung unten auf einem toten Server bestehen lassen.
             CODE=$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:3000/ || true)
             [ "$CODE" != "000" ] && [ -n "$CODE" ] && break
             sleep 2
           done
-          echo "server answered with HTTP $CODE"
+          echo "GET / -> HTTP $CODE"
+          # Der Kalender unter /public/ muss ohne Login erreichbar bleiben —
+          # daran haengen die bestehenden Abos der Eltern (src/site.config.ts).
+          ICS=$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:3000/public/{% endraw %}{{ calendar_filename }}{% raw %} || true)
+          echo "GET /public/{% endraw %}{{ calendar_filename }}{% raw %} -> HTTP $ICS"
           docker logs smoke
           docker rm -f smoke >/dev/null
-          # Jeder HTTP-Status beweist, dass der SSR-Server hochgekommen ist. Auf
-          # 200 wird bewusst nicht geprüft: Die Auth-Middleware antwortet
-          # unangemeldeten Anfragen mit 401, und das IST die gesunde Antwort im
-          # Produktivbetrieb.
+          # Kein 200 auf / erwarten: die Auth-Middleware antwortet
+          # unangemeldet mit 401, und das IST die gesunde Antwort.
           case "$CODE" in
             ''|000) echo "::error::server never answered"; exit 1 ;;
             *) echo "smoke test passed (HTTP $CODE)" ;;
           esac
+          [ "$ICS" = "200" ] || {
+            echo "::error::/public/{% endraw %}{{ calendar_filename }}{% raw %} returned $ICS, expected 200 (Kalender-Abos)"; exit 1; }
 
       - name: Build and push digest
         id: build
@@ -136,7 +160,6 @@ jobs:
   merge:
     needs: build
     runs-on: ubuntu-latest
-    timeout-minutes: 15
     steps:
       - name: Download digests
         uses: actions/download-artifact@v4
@@ -168,19 +191,92 @@ jobs:
             -t ${{ env.IMAGE }}:latest \
             $(printf '${{ env.IMAGE }}@sha256:%s ' *)
 
-      - name: Report the tag to pin
+      - name: Report the built tags
         run: |
           {
             echo "### Image gebaut"
             echo
             echo '```'
+            echo "${IMAGE}:${{ github.sha }}"
             echo "${IMAGE}:${{ steps.tag.outputs.tag }}"
             echo '```'
             echo
-            echo "Diesen Tag in \`apps/${{ github.event.repository.name }}/kustomization.yaml\` von"
-{% endraw %}
-            echo "[{{ gitops_repo }}](https://github.com/{{ gitops_repo }}) eintragen"
-{% raw %}
-            echo "und pushen - Argo CD rollt aus."
+            echo "Der Job \`deploy\` pinnt gleich \`:${{ github.sha }}\` und"
+            echo "veroeffentlicht das Overlay auf dem Branch \`production\`."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  # Pull-basiertes Deployment: das Produktions-Overlay auf den soeben gebauten,
+  # unveraenderlichen `:<sha>`-Tag pinnen und das Ergebnis auf den Branch
+  # `production` veroeffentlichen. Argo CD (Application `{% endraw %}{{ repo_name }}{% raw %}` in
+  # {% endraw %}{{ gitops_repo }}{% raw %}) verfolgt genau diesen Branch, zieht das
+  # geaenderte Overlay und rollt das Deployment vorwaerts — die CI bekommt
+  # dafuer keinerlei Cluster-Zugriff.
+  #
+  # Warum ein eigener Branch statt eines Commits zurueck auf `main`:
+  # `main` ist der Branch, in dem Menschen arbeiten (und ist dafuer gedacht,
+  # geschuetzt zu werden). Ein Bot, der dorthin zurueckschreibt, kollidiert mit
+  # dieser Rolle und wuerde sich ausserdem selbst wieder ausloesen —
+  # Build → Commit → Build. `production` ist unprotected, existiert nur fuer
+  # diesen Zweck und wird bei jedem Deploy force-gepusht; er traegt genau
+  # "Baum von main + gepinnter Image-Tag". Dieser Workflow triggert nur auf
+  # `main` (siehe `on:` oben), ein Push auf `production` startet also keinen
+  # neuen Lauf — kein Loop, kein `[skip ci]` noetig. Menschen fassen
+  # `production` nie an.
+  #
+  # `:latest` wird bewusst NICHT als Deploy-Tag verwendet: nur ein
+  # unveraenderlicher Tag beantwortet die Frage, welcher Quelltext laeuft.
+  deploy:
+    needs: merge
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      # Reicht fuer den Push auf `production`; die Repo-Voreinstellung fuer
+      # Workflow-Token ist `read`, deshalb steht das hier explizit.
+      contents: write
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          # Genau den Stand auschecken, aus dem das Image gebaut wurde — nicht
+          # die Spitze von main, die inzwischen weitergelaufen sein kann.
+          ref: ${{ github.sha }}
+
+      - name: Install kustomize
+        run: |
+          curl -sSL https://github.com/kubernetes-sigs/kustomize/releases/download/kustomize%2Fv5.4.3/kustomize_v5.4.3_linux_amd64.tar.gz \
+            | sudo tar xz -C /usr/local/bin
+          kustomize version
+
+      - name: Pin overlay to the freshly built :<sha> image
+        working-directory: deploy/overlays/production
+        run: |
+          kustomize edit set image ${{ env.IMAGE }}=${{ env.IMAGE }}:${{ github.sha }}
+          # Rendern, bevor irgendetwas gepusht wird: ein Overlay, das nicht
+          # baut, wuerde sonst als "Synced" auf production landen und Argo CD
+          # dort haengen lassen.
+          kustomize build . > /dev/null
+          git --no-pager diff -- kustomization.yaml
+
+      - name: Publish pinned overlay to the GitOps 'production' branch
+        run: |
+          git config user.name  "deploy-bot"
+          git config user.email "deploy-bot@users.noreply.github.com"
+          # NUR die eine Datei stagen, die dieser Job geaendert hat.
+          git add deploy/overlays/production/kustomization.yaml
+          git commit -m "chore(deploy): roll to ${{ github.sha }}"
+          # Voll qualifizierte Ref, damit der allererste Push den Branch
+          # anlegt — git kann fuer einen noch nicht existierenden Branch
+          # keinen vollen Refnamen erraten.
+          git push --force origin HEAD:refs/heads/production
+
+      - name: Report the deployed tag
+        run: |
+          {
+            echo "### Auf \`production\` veroeffentlicht"
+            echo
+            echo '```'
+            echo "${IMAGE}:${{ github.sha }}"
+            echo '```'
+            echo
+            echo "Argo CD zieht den Branch \`production\` und rollt aus."
           } >> "$GITHUB_STEP_SUMMARY"
 {% endraw %}

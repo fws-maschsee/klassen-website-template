@@ -107,8 +107,8 @@ Nach ein paar Minuten steht die Änderung auf der Website.
 ## Die Website nutzen
 
 1. **Website besuchen**: [{{ site_domain }}](https://{{ site_domain }})
-2. **Anmelden** mit einem Google- oder GitHub-Konto. Ein eigenes Passwort gibt
-   es nicht.
+2. **Anmelden** über die zentrale Anmeldung der Schule. Die Seite leitet dorthin
+   weiter; ein eigenes Passwort für diese Website gibt es nicht.
 3. **Inhalte ansehen**: Unterlagen und Berichte.
 
 ### Warum überhaupt anmelden?
@@ -118,8 +118,15 @@ die Klassengemeinschaft und für sonst niemanden.
 
 ### Die Anmeldung klappt nicht
 
-Dann ist das Konto wahrscheinlich noch nicht für die Klasse freigeschaltet. Eine
-kurze Mail an [{{ contact_email }}](mailto:{{ contact_email }}) genügt.
+Wer sich anmeldet, aber noch nicht für diese Klasse freigeschaltet ist, bekommt
+eine Seite, die genau das sagt - samt der E-Mail-Adresse, mit der er angemeldet
+ist. Diese Adresse in einer kurzen Mail an
+[{{ contact_email }}](mailto:{{ contact_email }}) nennen, dann wird der Zugang
+freigeschaltet.
+
+Freigeschaltet heißt: Die Person bekommt im Verwaltungssystem der Schule die
+Rolle `mitglied` für diese Klasse. Wer zusätzlich das Adressbuch und die
+Verteiler pflegen darf, hat die Rolle `admin`.
 
 ## Termine im eigenen Kalender
 
@@ -130,14 +137,44 @@ dazu:
 **[Klassenkalender abonnieren](webcal://{{ site_domain }}/public/{{ calendar_filename }})**
 
 Einmal antippen genügt - die Kalender-App fragt dann nach.
-{% if mailing_list %}
 
-## Kommunikation
+## Mailverteiler
 
-**Mailverteiler**: [{{ mailing_list }}](mailto:{{ mailing_list }})
+Die Klasse betreibt ihre Verteiler selbst. Eine Liste `eltern` ist unter
 
-Über diese Adresse erreichen Mitteilungen alle Eltern der Klasse.
-{% endif %}
+```
+eltern@{{ repo_name }}.{{ list_base_domain }}
+```
+
+erreichbar; eine Mail dorthin geht an alle Familien, die in der zugehörigen
+Gruppe stehen. Welche Listen es gibt, wer sie erreicht und wer an sie schreiben
+darf, steht in der **Verwaltung** unter
+[{{ site_domain }}/verwaltung](https://{{ site_domain }}/verwaltung).
+
+### Wer darf an eine Liste schreiben?
+
+Neue Listen stehen auf **offen**. Das heißt wörtlich offen: *Jede*
+Absenderadresse im Internet kann an eine solche Liste schreiben und erreicht
+damit alle Familien darauf - auch jemand, der die Adresse nur erraten hat.
+
+Das ist mit Absicht die Vorgabe. Ein Verteiler, der nur Eingeweihte durchlässt,
+verliert genau die Post, auf die es ankommt: vom Schulbüro, von einer Lehrkraft,
+von einem Elternteil, das gerade von der Arbeitsadresse schreibt. Und wer nicht
+durchkommt, merkt es nicht - die Mail landet als Unzustellbarkeitsnachricht bei
+ihm und nie bei der Klasse.
+
+Wem das zu weit geht, stellt eine Liste in der Verwaltung auf
+**eingeschränkt**. Dann kommt nur durch, wer in einer Absender-Gruppe steht oder
+auf eines der hinterlegten Muster passt:
+
+```
+anna@example.org             genau diese Adresse
+*@waldorfschule-beispiel.de  jede Adresse dieser Schuldomain
+```
+
+Der Stern ersetzt nur den Teil vor dem `@` und trifft keine Subdomains. Diese
+Entscheidung sollte die Klasse einmal bewusst treffen - nicht erst, wenn eine
+wichtige Mail nicht angekommen ist.
 
 ## Kontakt
 
@@ -149,10 +186,12 @@ Einmal antippen genügt - die Kalender-App fragt dann nach.
 Die technische Dokumentation steht in [`CLAUDE.md`](CLAUDE.md). Kurzfassung:
 
 ```bash
-npm ci          # Abhängigkeiten installieren (nicht npm install)
-npm run dev     # Entwicklungsserver auf http://localhost:4321
-npm run build   # Produktions-Build
-npm test        # End-to-End-Tests (Playwright)
+npm ci            # Abhängigkeiten installieren (nicht npm install)
+npm run dev       # Entwicklungsserver auf http://localhost:4321
+npm run build     # Produktions-Build
+npm run typecheck # astro check
+npm test          # Unit-Tests (vitest)
+npm run test:e2e  # End-to-End-Tests (Playwright)
 ```
 
 Diese Website wurde aus der Vorlage

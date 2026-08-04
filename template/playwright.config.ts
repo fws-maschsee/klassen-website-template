@@ -2,6 +2,12 @@ import { defineConfig, devices } from '@playwright/test'
 
 export default defineConfig({
 	testDir: './tests/e2e',
+	// Die Autorisierungs-Tests unter tests/e2e/authz/ gehoeren NICHT hierher.
+	// Dieser Lauf startet den Server mit `DISABLE_AUTH=true`, weil er Inhalte
+	// prueft; jene pruefen die Anmeldung selbst und brauchen einen Server mit
+	// echter Anmeldung samt lokalem ZITADEL. Sie haben deshalb eine eigene
+	// Konfiguration: playwright.authz.config.ts.
+	testIgnore: '**/authz/**',
 	fullyParallel: true,
 	forbidOnly: !!process.env.CI,
 	retries: process.env.CI ? 2 : 0,
@@ -18,15 +24,19 @@ export default defineConfig({
 		},
 	],
 	webServer: {
-		command: 'npm run build && npm run preview',
+		// Seit der Adapter im `middleware`-Modus laeuft, gibt es kein
+		// `astro preview` mehr: der Server ist `server.ts` hinter Express. Vorher
+		// muessen die Migrations laufen, sonst findet der Start keine Tabellen.
+		command: 'npm run build && npm run db:migrate && npm start',
 		url: 'http://localhost:4321',
 		reuseExistingServer: true,
-		timeout: 180000,
+		timeout: 120000,
 		env: {
 			...process.env,
-			// Ohne diese Variable verlangt die Middleware eine Anmeldung gegen
-			// PocketBase, und jeder Test bekäme eine 401.
 			DISABLE_AUTH: 'true',
+			PORT: '4321',
+			DB_PATH: './data/e2e.db',
+			DATABASE_URL: 'sqlite:./data/e2e.db',
 		},
 	},
 })

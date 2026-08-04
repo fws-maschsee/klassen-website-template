@@ -1,0 +1,172 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ repo_name }}
+  namespace: {{ repo_name }}
+spec:
+  replicas: 1
+  # revisionHistoryLimit: 0 und eine kurze progressDeadline sind die stehende
+  # Konsequenz aus runbooks/incidents/disk-pressure.md — alte ReplicaSets
+  # halten ihre Image-Layer auf der einen Platte des Nodes fest.
+  revisionHistoryLimit: 0
+  progressDeadlineSeconds: 120
+  selector:
+    matchLabels:
+      app: {{ repo_name }}
+  template:
+    metadata:
+      labels:
+        app: {{ repo_name }}
+    spec:
+      containers:
+        - name: app
+          # amd64, gebaut auf einem nativen Runner vom Deploy-Workflow des
+          # App-Repos (niemals QEMU — AGENTS.md Invariante 5).
+          #
+          # Das GHCR-Package ist PRIVAT und muss es bleiben: `astro build`
+          # kompiliert src/content/ (Berichte, Elternabend-Protokolle,
+          # Unterlagen) mit ins Image. Kein imagePullSecret hier — der
+          # Registry-Credential liegt node-weit in
+          # /etc/rancher/k3s/registries.yaml.
+          #
+          # Bare Referenz mit Absicht — der Tag wird vom `images:`-Block in
+          # kustomization.yaml gepinnt, das ist die Zeile, die ein Rollout
+          # anfasst.
+          image: ghcr.io/{{ github_org }}/{{ repo_name }}
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 3000
+          env:
+            # @astrojs/node standalone liest HOST/PORT; :: bindet dual-stack.
+            - name: HOST
+              value: "::"
+            - name: PORT
+              value: "3000"
+            # Die oeffentliche Adresse dieser Seite. Sie steht hier und nicht
+            # im Image, weil sie zum Host im Ingress unten gehoert — wer den
+            # aendert, sieht diese Zeile direkt daneben.
+            #
+            # Sie muss ZEICHENGENAU zu der redirect_uri passen, die am
+            # OIDC-Client im ZITADEL-Projekt `{{ repo_name }}` hinterlegt ist
+            # (dort: <origin>/auth/callback). Ohne sie leitet die App aus dem
+            # Host-Header ab — und Astro 5.18 meldet dort ohne konfigurierte
+            # `allowedDomains` schlicht `localhost`, womit jede Anmeldung
+            # scheitert.
+            - name: OIDC_PUBLIC_ORIGIN
+              value: "https://{{ site_domain }}"
+            # Aussteller-URL des OAuth-Servers, den der MCP-Endpunkt unter
+            # /mcp mitbringt. Sie muss zeichengenau die Adresse sein, unter
+            # der die Instanz erreichbar ist — die Discovery-Metadaten
+            # (/.well-known/oauth-authorization-server) tragen sie, und ein
+            # MCP-Client verwirft Tokens, deren Aussteller nicht dazu passt.
+            # Ohne sie greift SITE_URL aus src/site.config.ts. Das stimmt im
+            # Normalfall — aber nicht, wenn die Klasse unter einer aelteren
+            # Domain laeuft als der Ingress hier ausweist.
+            - name: PUBLIC_BASE_URL
+              value: "https://{{ site_domain }}"
+            # Organisation und Projekt in ZITADEL. Zusammen mit dem PAT unten
+            # werden sie gebraucht, um die Rollen-Grants der Eltern zu lesen
+            # (Adressbuch-Abgleich, src/server/auth/grants.ts). Beide IDs sind
+            # nicht geheim; sie stehen im ZITADEL-Dashboard.
+            - name: ZITADEL_ORG_ID
+              value: "{{ zitadel_org_id }}"
+            - name: ZITADEL_PROJECT_ID
+              value: "{{ zitadel_project_id }}"
+          # OIDC-Zugangsdaten und der Schluessel, mit dem das Sitzungs-Cookie
+          # verschluesselt wird. App-Secrets, also als SealedSecret im Repo
+          # (server-config AGENTS.md Invariante 3) — sealed-oidc.yaml nebenan.
+          # Der Client selbst liegt im ZITADEL-Projekt `{{ repo_name }}` und ist
+          # Identity-Content, per API angelegt und hier nicht nachgehalten
+          # (Invariante 6).
+          #
+          # Fehlen diese Werte, antwortet die App auf geschuetzten Pfaden mit
+          # 503 statt ungeschuetzt auszuliefern. Der Klassenkalender unter
+          # /public/ bleibt davon unberuehrt.
+          envFrom:
+            - secretRef:
+                name: {{ repo_name }}-oidc
+            # SES-SMTP-Zugang fuer den Versand und das mit dem
+            # Cloudflare-Worker geteilte HMAC-Secret fuer den Listen-Eingang.
+            # Auch App-Secrets, also ebenfalls als SealedSecret (inv. 3).
+            #
+            # Fehlt LIST_WEBHOOK_SECRET, weist /api/lists/incoming jede
+            # eingehende Nachricht ab — der Endpunkt ist oeffentlich
+            # erreichbar und haengt allein an dieser Signatur.
+            - secretRef:
+                name: {{ repo_name }}-mail
+            # ZITADEL_SERVICE_TOKEN — der PAT des Machine-Users
+            # `svc-grants-reader`. Er darf ausschliesslich LESEN (Managerrolle
+            # ORG_OWNER_VIEWER; ein Schreibversuch beantwortet ZITADEL mit
+            # 403, gemessen).
+            #
+            # Das ist ein INFRASTRUKTUR-Credential und liegt deshalb NICHT im
+            # Repository, auch nicht sealed (server-config AGENTS.md
+            # Invariante 3 und 6). Es wird von Hand mit `kubectl` angelegt und
+            # muss beim Neuaufbau des Clusters neu erzeugt werden — der
+            # Runbook-Eintrag dazu steht in {{ gitops_repo }}.
+            - secretRef:
+                name: {{ repo_name }}-zitadel
+          # Der Node hat 7,8 GB, davon rund 3 GB Cluster. Requests sind das,
+          # was der Scheduler tatsaechlich schuetzt.
+          resources:
+            requests:
+              cpu: 50m
+              memory: 192Mi
+            limits:
+              # Bewusst kein CPU-Limit: CPU ist kompressibel, ein Limit bringt
+              # auf einem Single-Tenant-Node nur Throttling-Latenz. Speicher
+              # ist nicht kompressibel und wird deshalb gedeckelt.
+              memory: 512Mi
+          # Unangemeldet antwortet die App mit 302 zur zentralen Anmeldung
+          # (oder 401, wenn der Aufrufer gar kein HTML angefragt hat). Beides
+          # ist der gesunde Zustand und beides ist kein 2xx; httpGet wuerde es
+          # als Fehler werten, deshalb TCP-Probes: die belegen, dass der
+          # Server lauscht — mehr kann eine Probe bei einer Seite ohne
+          # oeffentliche Startseite ehrlich nicht behaupten.
+          readinessProbe:
+            tcpSocket:
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 3
+          livenessProbe:
+            tcpSocket:
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 20
+            timeoutSeconds: 3
+            failureThreshold: 3
+          # Gegen das echte Image verifiziert: laeuft als uid 1000 mit
+          # read-only rootfs, sofern /tmp beschreibbar ist.
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            # Die SQLite-Datei mit Adressbuch, Gruppen, Listen, Versandjournal
+            # und den MCP-Tokens. Sie MUSS auf einem persistenten Volume
+            # liegen: ein emptyDir waere nach jedem Pod-Neustart leer, und weg
+            # waeren nicht nur die Adressen, sondern auch die Zuordnung der
+            # Instanz (app_meta.instance) und jede erteilte MCP-Autorisierung.
+            - name: data
+              mountPath: /data
+      volumes:
+        - name: tmp
+          emptyDir:
+            medium: Memory
+            sizeLimit: 64Mi
+        - name: data
+          persistentVolumeClaim:
+            claimName: {{ repo_name }}-data
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        # local-path legt das Verzeichnis als root an. Ohne fsGroup koennte
+        # der Prozess (uid 1000) darin nicht schreiben und der Start braeche
+        # beim ersten Oeffnen der Datenbank ab.
+        fsGroup: 1000

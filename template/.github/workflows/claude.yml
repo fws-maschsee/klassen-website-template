@@ -1,10 +1,3 @@
-# Lässt Claude auf @claude-Erwähnungen in Issues und Pull Requests antworten.
-# Das ist der Weg, auf dem Eltern Änderungswünsche als Issue formulieren und
-# umgesetzt bekommen, ohne selbst zu editieren.
-#
-# Braucht das Repository-Secret CLAUDE_CODE_OAUTH_TOKEN. Ist es nicht gesetzt,
-# passiert nichts weiter - der Workflow läuft nur bei @claude-Erwähnungen und
-# schlägt dann fehl. Wer das nicht will, löscht diese Datei.
 name: Claude Code
 
 on:

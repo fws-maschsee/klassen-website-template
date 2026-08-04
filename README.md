@@ -26,13 +26,26 @@ git init && git add -A && git commit -m "Website aus Vorlage erzeugt"
 gh repo create fws-maschsee/klasse-neu --private --source=. --push
 ```
 
-Danach die drei Dinge erledigen, die außerhalb des Repositories liegen - sie
-stehen ausführlich in `deploy/README.md` der erzeugten Instanz:
+Danach die Dinge erledigen, die außerhalb des Repositories liegen - sie stehen
+ausführlich in `deploy/README.md` der erzeugten Instanz:
 
-1. **Benutzergruppe im Auth-Backend anlegen** und die Eltern eintragen. Ohne sie
-   antwortet die Seite jedem mit 401.
-2. **DNS** auf den Cluster zeigen lassen (bei Wildcard-Eintrag: nichts zu tun).
-3. **`deploy/` ins GitOps-Repository kopieren** und dort verdrahten.
+1. **ZITADEL-Projekt für die Klasse anlegen**: Rollen `mitglied` und `admin`,
+   einen OIDC-Client mit der redirect_uri `https://<domain>/auth/callback`, und
+   die Grants der Eltern. Ohne das kommt niemand hinein.
+2. **Die Secrets erzeugen.** Die beiden SealedSecrets unter
+   `deploy/overlays/production/` kommen als **Gerüst** mit Platzhaltern - ein
+   SealedSecret ist für genau einen Namespace und Cluster verschlüsselt und
+   lässt sich nicht mitliefern. Die `kubeseal`-Kommandos stehen als Kommentar
+   in den Dateien.
+3. **DNS** auf den Cluster zeigen lassen (bei Wildcard-Eintrag: nichts zu tun).
+4. **Argo-CD-`Application` im GitOps-Repository anlegen**, die auf den Branch
+   `production` dieses neuen Repositories zeigt. Die Manifeste selbst bleiben
+   im App-Repo.
+
+**ZITADEL ist nicht Teil dieser Vorlage.** Projekt, Rollen, OIDC-Client und
+Grants sind Identity-Content: Sie werden über die ZITADEL-API gepflegt und
+stehen in keinem Repository - auch nicht hier. Die Vorlage fragt nur nach den
+IDs, die die App zur Laufzeit braucht.
 
 ## Später Verbesserungen nachziehen
 
@@ -63,20 +76,48 @@ haben.
 
 ## Der Stack, den die Vorlage festhält
 
-- **Astro 5** im SSR-Modus über `@astrojs/node` (`mode: 'standalone'`)
+- **Astro 5** im SSR-Modus über `@astrojs/node` im Modus `middleware`; der
+  Astro-Server hängt in einem Express-Prozess (`server.ts`), damit MCP-Endpunkt,
+  OAuth-Routen und Queue-Worker daneben laufen können
 - **Shipyard**: `@levino/shipyard-base`, `-docs`, `-blog`
 - **Tailwind 3 + daisyUI 4**
-- **Auth** über `@levino/pocketbase-auth`, Gruppenprüfung gegen PocketBase
+- **Anmeldung** über OpenID Connect gegen ein zentrales ZITADEL; Zugang hat, wer
+  im ZITADEL-**Projekt der Klasse** die Rolle `mitglied` hat
+- **SQLite** (better-sqlite3) auf einem persistenten Volume, Schema über
+  dbmate-Migrationen in `db/migrations/`
+- **Adressbuch, Gruppen und Mailinglisten** samt Verwaltungsoberfläche unter
+  `/verwaltung`
+- **MCP-Server** unter `/mcp` mit eigenem OAuth-2.1-Server samt Dynamic Client
+  Registration - damit lässt sich das Adressbuch im Gespräch pflegen
+- **Cloudflare-Email-Worker** (`email-worker/`) als Eingang der Mailinglisten,
+  Versand über Amazon SES
 - Inhalte als Markdown unter `src/content/docs` und `src/content/blog`
-- Docker-Image (zweistufig), Deployment auf k3s über Argo CD
+- Docker-Image (dreistufig), Deployment auf k3s über Argo CD
 
 SSR und nicht statisch, weil die Auth-Middleware jede Anfrage sehen muss. Ein
 statischer Build würde alle Protokolle als öffentliche HTML-Dateien ausliefern.
 
+### Was die Vorlage über Daten festlegt
+
+Das Adressbuch speichert **nur Vorname, Nachname und E-Mail-Adresse**. Keine
+Anrede, keine Telefonnummer, keine Freitext-Notizen. Eine Vorlage, die eine
+Anrede aus drei festen Werten vorschreibt, trifft eine Festlegung über
+Menschen, die sie niemandem aufdrängen sollte; und jedes vorgegebene Feld ist
+eines, das jede neue Klasse begründen müsste. Wer ein Feld braucht, ergänzt es
+in seiner Klasse mit einer eigenen Migration.
+
+Neue Mailinglisten stehen auf `poster_policy: offen` - jede Absenderadresse
+darf schreiben. Das ist die bewusste Vorgabe: Ein Verteiler, der nur
+Eingeweihte durchlässt, verliert genau die Post, auf die es ankommt, und der
+Absender erfährt davon nur über eine Unzustellbarkeitsnachricht. Wer es enger
+will, stellt eine Liste in der Verwaltung auf `eingeschraenkt` und hinterlegt
+Muster (`anna@example.org` oder `*@schule.example`). Die erzeugte README
+erklärt beides, damit die Klasse die Entscheidung bewusst trifft.
+
 ## Die Fallen, die die Vorlage verhindert
 
-Alle sieben sind beim Aufbau der beiden Referenz-Instanzen wirklich passiert.
-Eine Vorlage, die sie nicht verhindert, wäre wertlos.
+Alle zehn sind beim Aufbau und Betrieb der beiden Referenz-Instanzen wirklich
+passiert. Eine Vorlage, die sie nicht verhindert, wäre wertlos.
 
 ### 1. Shipyard-Versionen sind gepinnt
 
@@ -150,13 +191,44 @@ Aus demselben Grund liegt die Datei unter `public/public/` und ist in
 `src/middleware.ts` vom Login ausgenommen: Kalender-Apps schicken kein Cookie
 mit.
 
-### 7. Die Auth-Gruppe gehört dem Backend, nicht diesem Repository
+### 7. Die Rolle gehört dem Identity-Provider, nicht diesem Repository
 
-`groupField` in `src/middleware.ts` muss exakt dem Gruppennamen in PocketBase
-entsprechen. Wird er hier geändert, ohne die Gruppe dort vorher umzubenennen,
-findet die Prüfung niemanden mehr und **alle Eltern sind ausgesperrt**. Die
-Reihenfolge ist bindend: erst PocketBase, dann `AUTH_GROUP` in
-`src/site.config.ts` und `AUTH_POCKETBASE_GROUP` im `Dockerfile`.
+`AUTH_ROLE` in `src/site.config.ts` und `OIDC_REQUIRED_ROLE` im `Dockerfile`
+müssen exakt einer Rolle im ZITADEL-**Projekt dieser Klasse** entsprechen. Wird
+der Wert hier geändert, ohne die Rolle dort vorher anzulegen und die Grants
+umzuhängen, findet die Prüfung niemanden mehr und **alle Eltern sind
+ausgesperrt**. Die Reihenfolge ist bindend: erst ZITADEL, dann dieses
+Repository.
+
+Dass alle Klassen dieselbe Rolle `mitglied` benutzen, ist gefahrlos: ZITADEL
+liefert im Token nur die Rollen **des Projekts, zu dem der OIDC-Client dieser
+Seite gehört**. Die Trennung entsteht aus der Projektzuordnung, nicht aus dem
+Namen.
+
+### 8. Der Email-Worker wird nie von Hand ausgerollt
+
+Kein `wrangler deploy`, kein `wrangler versions upload`, kein
+`wrangler secret put`. Ein einzelner solcher Upload hat den Maileingang zweier
+Klassen blockiert: Die hochgeladene Version verdrängte die aus `main` gebaute,
+und eingehende Listenmail lief ins Leere. Ausgerollt wird ausschließlich über
+die GitHub-Integration von Cloudflare aus `main`; das geteilte Secret wird
+danach im Dashboard eingetragen.
+
+### 9. Eine Instanz pro Klasse, und die Datei weiß es
+
+Der Instanzname steht doppelt: als `MCP_INSTANCE_NAME` im Deployment und als
+`app_meta.instance` **in der Datenbankdatei**, wohin er beim ersten Start
+einmalig geschrieben wird. Weichen beide voneinander ab, fährt der Server gar
+nicht erst hoch. Ohne diese Sperre wäre ein falsch gemountetes Volume ein
+Versand von Elternpost in die falsche Klasse - ein Datenschutzvorfall, kein
+Betriebsfehler.
+
+### 10. Keine echten Personendaten, nirgends
+
+Diese Vorlage ist ein **öffentliches** Repository. In `src/content/`, in
+Beispieldaten, in Migrationen und in Test-Fixtures stehen ausschließlich
+erfundene Namen und `example.org`-Adressen. Die SealedSecrets sind Gerüste mit
+Platzhaltern; die CI prüft, dass sie es bleiben.
 
 ## Variablen
 
@@ -167,15 +239,18 @@ Reihenfolge ist bindend: erst PocketBase, dann `AUTH_GROUP` in
 | `school_name` | Freie Waldorfschule Hannover-Maschsee | Erscheint auf der Startseite. |
 | `first_post_date` | 2026-01-01 | Datum des Willkommens-Beitrags. Auf den heutigen Tag setzen. |
 | `github_org` | fws-maschsee | Besitzer des erzeugten Repositories. |
-| `repo_name` | `klasse-<slug>` | Repository- und Namespace-Name, Image-Name. |
+| `repo_name` | `klasse-<slug>` | Repository, Namespace, Image, Instanz-Identität, DB-Dateiname, Klassen-Label der Listen. Faktisch unveränderlich. |
 | `base_domain` | fws-maschsee-test.de | Basis-Domain; braucht `*.<domain>` im DNS. |
 | `site_domain` | `klasse-<slug>.<base_domain>` | Vollständiger Hostname. Nach dem Livegang faktisch festgenagelt. |
 | `contact_email` | post@levinkeller.de | Technischer Kontakt in der README. |
-| `mailing_list` | `eltern-klasse-<slug>@googlegroups.com` | Elternverteiler. Leer = Abschnitt entfällt. |
-| `auth_pocketbase_url` | https://api.levinkeller.de | Auth-Backend. |
-| `auth_group` | `<slug>` | Gruppenname im Auth-Backend. Muss dort exakt so existieren. |
+| `oidc_issuer` | `https://id.<base_domain>` | Aussteller des zentralen ZITADEL. |
+| `zitadel_org_id` | leer | ID der ZITADEL-Organisation. Für den Adressbuch-Abgleich. |
+| `zitadel_project_id` | leer | ID des ZITADEL-Projekts **dieser Klasse**. |
+| `mail_from` | `noreply@<base_domain>` | Verifizierte SES-Absenderadresse. |
+| `list_base_domain` | `lists.<base_domain>` | Listen-Domain ohne Klassen-Label; braucht `*.<domain>` als MX. |
+| `worker_name` | `<repo_name>` | Name des Cloudflare-Workers dieser Klasse. |
 | `calendar_filename` | `<slug>.ics` | Dateiname des Kalenders. Danach unveränderlich. |
-| `gitops_repo` | fws-maschsee/server-config | Wohin der Image-Tag eingetragen wird. |
+| `gitops_repo` | fws-maschsee/server-config | Wo die Argo-CD-`Application` liegt. |
 | `target_arch` | amd64 | Architektur des Cluster-Knotens. Bestimmt den Runner. |
 | `plausible_script_url` | analytics.levinkeller.de | Besucherzählung. Leer = keine Statistik. |
 
@@ -193,8 +268,12 @@ würde, die niemand testet:
 - **Biome** als Formatter und Linter, Version an den Workflow gekoppelt.
 - **Routen `/docs` und `/blog`**, Beschriftungen "Unterlagen" und "Berichte".
 - **Deutsch** als Sprache des erzeugten Repositories.
-- **Kubernetes-Manifeste im GitOps-Repo**, nicht in der Klasse. Sonst bräuchte
-  ein von Eltern bearbeitetes Repository ein Token mit Cluster-Schreibrecht.
+- **Kubernetes-Manifeste im App-Repo**, unter `deploy/overlays/production/`.
+  Im GitOps-Repo liegt nur die Argo-CD-`Application`. Ausgerollt wird über den
+  Branch `production`, den der Deploy-Workflow schreibt - das Repository
+  bekommt dadurch **keinen** Cluster-Zugriff.
+- **Nur Name und E-Mail im Adressbuch.** Siehe oben.
+- **ZITADEL** als Identity-Provider, ein Projekt pro Klasse.
 
 ## Aufbau dieses Repositories
 
@@ -215,11 +294,15 @@ wird zu `public/public/wiesen.ics`.
 Jeder Push prüft die ganze Kette:
 
 1. **generate** - Instanz erzeugen, auf unersetzte Platzhalter prüfen, alle
-   YAML-Dateien parsen, `kubectl kustomize deploy/` bauen.
-2. **build** - `npm ci`, `npm run build`, `astro check`, `biome ci`.
-3. **e2e** - Playwright gegen die erzeugte Instanz.
-4. **image** - Docker-Image bauen und mit den Cluster-Einschränkungen starten.
-5. **update-roundtrip** - `copier update` von der Vorgänger-Revision muss
+   YAML-Dateien parsen, `kubectl kustomize deploy/overlays/production` bauen,
+   prüfen, dass die SealedSecrets Platzhalter geblieben sind.
+2. **build** - `npm ci`, `npm run build`, `astro check`, `npm test`, `biome ci`.
+3. **email-worker** - `npm ci`, `npm run typecheck`, `npm test` im
+   Worker-Projekt. Kein Deployment.
+4. **e2e** - Playwright gegen die erzeugte Instanz.
+5. **image** - Docker-Image bauen und mit den Cluster-Einschränkungen starten
+   (`--user 1000:1000 --read-only --tmpfs /tmp --tmpfs /data`).
+6. **update-roundtrip** - `copier update` von der Vorgänger-Revision muss
    konfliktfrei durchlaufen.
 
 Bricht eine der Stufen, ist die Vorlage kaputt - und zwar bevor eine Klasse sie

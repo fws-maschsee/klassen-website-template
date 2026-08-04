@@ -1,0 +1,42 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# Produktions-Overlay dieser App. Argo CD (Application `{{ repo_name }}` in
+# {{ gitops_repo }}) liest GENAU DIESES VERZEICHNIS — aber nicht von
+# `main`, sondern vom Branch `production`.
+#
+# Warum ein eigener Branch: `main` ist das, was Menschen schreiben. Der
+# `images:`-Block unten ist das, was deployt IST, und den schreibt der
+# `deploy`-Job in .github/workflows/deploy.yml nach jedem Build. Beides im
+# selben Branch zu mischen hiesse, dass ein Bot in den Branch schreibt, in dem
+# gearbeitet wird — und dass ein Deploy-Commit den naechsten Build ausloest.
+# `production` wird bei jedem Deploy force-gepusht und traegt "Baum von main +
+# gepinnter Tag". Menschen fassen ihn nie an.
+#
+# Der Tag hier ist ein Platzhalter fuer den Erstzustand; ab dem ersten
+# CI-Deploy steht hier immer die commit-SHA des gebauten Standes. Niemals
+# `latest` eintragen: nur ein unveraenderlicher Tag beantwortet die Frage,
+# welcher Quelltext gerade laeuft. Vor dem ersten Deploy zeigt der Wert unten
+# auf ein Image, das es noch gar nicht gibt — das ist richtig so: der erste
+# Lauf des Deploy-Workflows ersetzt ihn.
+namespace: {{ repo_name }}
+
+resources:
+  - deployment.yaml
+  - service.yaml
+  - ingress.yaml
+  # OIDC-Zugangsdaten und der Schluessel des Sitzungs-Cookies. App-Secrets,
+  # also als SealedSecret (server-config AGENTS.md Invariante 3). Ein
+  # SealedSecret ist fuer genau diesen Namen und Namespace verschluesselt,
+  # nicht fuer ein Repository — entschluesseln kann es nur der
+  # sealed-secrets-Controller im Cluster.
+  - sealed-oidc.yaml
+  # SES-Zugang und das mit dem Cloudflare-Worker geteilte HMAC-Secret.
+  - sealed-mail.yaml
+  # Persistentes Volume fuer /data. Ohne das ist die SQLite-Datei nach jedem
+  # Pod-Neustart weg — der Fehler, den man genau einmal macht.
+  - pvc.yaml
+
+images:
+  - name: ghcr.io/{{ github_org }}/{{ repo_name }}
+    newTag: "erster-deploy-ersetzt-diesen-wert"

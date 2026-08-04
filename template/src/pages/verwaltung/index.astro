@@ -1,0 +1,482 @@
+---
+import Layout from '@levino/shipyard-base/layouts/Page.astro'
+import { listGroups } from '../../lib/db/groups.js'
+import { instanceLabel } from '../../lib/db/instance.js'
+import {
+  listMailingLists,
+  listPosterGroups,
+  listRecipientGroups,
+  listSenderPatterns,
+  setListPosterPolicy,
+} from '../../lib/db/mailingLists.js'
+import {
+  deleteMitglied,
+  getMitgliedGroups,
+  listMitglieder,
+  upsertMitglied,
+} from '../../lib/db/members.js'
+import {
+  listClientUsage,
+  revokeAllTokensForClientAndUser,
+} from '../../lib/db/oauth.js'
+import { listDomain } from '../../lib/email/config.js'
+import {
+  canEdit,
+  canSeePersonalData,
+  deniedMessage,
+  ROLE_ADMIN,
+  ROLE_MITGLIED,
+} from '../../server/auth/roles.js'
+import { publicBaseUrl } from '../../server/config.js'
+
+export const prerender = false
+
+/**
+ * Verwaltung der Klasse: Verteiler, Gruppen, Adressbuch und die Verbindung
+ * zum MCP-Server.
+ *
+ * Wer hierher kommt, ist angemeldet — die Middleware laesst sonst niemanden
+ * durch. Was er hier SIEHT und DARF, entscheidet `src/server/auth/roles.ts`,
+ * dieselbe Datei, die der MCP-Server fuer jedes Werkzeug fragt. Ein Klick
+ * hier und ein `upsert_mitglied` ueber MCP laufen durch dieselbe Pruefung,
+ * nicht durch zwei aehnliche.
+ *
+ * Die Trennung ist bewusst nicht "alles oder nichts":
+ *
+ *   Jedes Mitglied sieht, WELCHE Verteiler es gibt und WELCHE GRUPPEN sie
+ *   erreichen. Das ist die Frage, die man vor dem Absenden beantwortet haben
+ *   will — schreibe ich gerade an alle Eltern oder auch ans Kollegium? Sie
+ *   zu beantworten braucht keine einzige fremde Adresse.
+ *
+ *   WER in einer Liste steht, ist dagegen personenbezogen und geht die
+ *   uebrigen Familien nichts an. Das Adressbuch sieht nur `admin`.
+ */
+
+const roles = Astro.locals.user?.roles ?? []
+const mayEdit = canEdit(roles)
+const maySeePersons = canSeePersonalData(roles)
+const userId = Astro.locals.user?.sub ?? ''
+
+let notice: { kind: 'ok' | 'error'; text: string } | null = null
+
+if (Astro.request.method === 'POST') {
+  const form = await Astro.request.formData()
+  const action = String(form.get('action') ?? '')
+  const text = (name: string): string => String(form.get(name) ?? '').trim()
+
+  // Zugriff einer verbundenen Anwendung beenden: das darf jeder fuer SEINE
+  // eigenen Verbindungen — es ist der Widerruf einer Vollmacht, die er selbst
+  // erteilt hat, und keine Verwaltung fremder Daten.
+  if (action === 'revoke') {
+    const clientId = text('client_id')
+    const { access, refresh } = revokeAllTokensForClientAndUser(
+      clientId,
+      userId,
+    )
+    notice = {
+      kind: 'ok',
+      text: `Zugriff beendet: ${access} Zugriffs- und ${refresh} Erneuerungs-Token widerrufen. Die Anwendung muss sich neu autorisieren.`,
+    }
+  } else if (!mayEdit) {
+    // Nicht nur die Formulare ausblenden: ein POST kommt auch ohne sie an.
+    return new Response(deniedMessage('bearbeiten'), {
+      status: 403,
+      headers: { 'Content-Type': 'text/plain; charset=utf-8' },
+    })
+  } else {
+    try {
+      if (action === 'upsert') {
+        const row = upsertMitglied({
+          id: text('id') || undefined,
+          first_name: text('first_name'),
+          last_name: text('last_name'),
+          email: text('email') || null,
+          groups: form.getAll('groups').map(String),
+        })
+        notice = {
+          kind: 'ok',
+          text: `Gespeichert: ${row.first_name} ${row.last_name} (${row.id})`,
+        }
+      } else if (action === 'list-policy') {
+        const row = setListPosterPolicy(
+          text('list_address'),
+          text('poster_policy') === 'eingeschraenkt' ? 'eingeschraenkt' : 'offen',
+          // Ein Muster pro Zeile; Kommas sind erlaubt, weil sie sich beim
+          // Kopieren aus einer Mail kaum vermeiden lassen.
+          text('sender_patterns')
+            .split(/[\n,]/)
+            .map((entry) => entry.trim())
+            .filter(Boolean),
+        )
+        notice = {
+          kind: 'ok',
+          text:
+            row.poster_policy === 'offen'
+              ? `Liste "${row.address}": jede Absenderadresse darf jetzt schreiben.`
+              : `Liste "${row.address}": nur noch berechtigte Absender.`,
+        }
+      } else if (action === 'delete') {
+        const id = text('id')
+        notice = deleteMitglied(id)
+          ? { kind: 'ok', text: `Eintrag ${id} geloescht.` }
+          : { kind: 'error', text: `Eintrag ${id} existierte nicht.` }
+      }
+    } catch (error) {
+      notice = { kind: 'error', text: (error as Error).message }
+    }
+  }
+}
+
+// Personenbezogenes wird gar nicht erst geladen, wenn es niemand sehen darf.
+const mitglieder = maySeePersons
+  ? listMitglieder().map((row) => ({ ...row, groups: getMitgliedGroups(row.id) }))
+  : []
+const groups = listGroups()
+const lists = listMailingLists()
+const clients = userId ? listClientUsage(userId) : []
+const mcpUrl = `${publicBaseUrl()}/mcp`
+const editId = new URL(Astro.request.url).searchParams.get('bearbeiten')
+const editing = editId ? mitglieder.find((m) => m.id === editId) : undefined
+---
+
+<Layout title="Verwaltung">
+  <div class="container mx-auto px-4 py-8">
+    <h1 class="text-2xl font-bold mb-2">Verwaltung — {instanceLabel()}</h1>
+
+    <p class="mb-6">
+      {mayEdit ? (
+        <>Du hast die Rolle <code>{ROLE_ADMIN}</code> und darfst Adressbuch,
+        Gruppen und Verteiler pflegen.</>
+      ) : (
+        <>Du hast die Rolle <code>{ROLE_MITGLIED}</code>. Du siehst, welche
+        Verteiler es gibt und welche Gruppen sie erreichen. Wer im Einzelnen
+        auf einer Liste steht, sehen nur Zugänge mit der Rolle
+        <code>{ROLE_ADMIN}</code> — das sind die Adressen anderer Familien.</>
+      )}
+    </p>
+
+    {notice && (
+      <p class={`not-prose mb-6 rounded p-3 ${notice.kind === 'ok' ? 'bg-success/20' : 'bg-error/20'}`}>
+        {notice.text}
+      </p>
+    )}
+
+    {/* ---------------------------------------------------------------- */}
+    <h2 class="text-xl font-bold mt-8 mb-3">Mailinglisten ({lists.length})</h2>
+    <p class="mb-3">
+      Eine Mail an eine dieser Adressen erreicht alle Personen der genannten
+      Gruppen. Wer an eine Liste senden <em>darf</em>, steht in der Spalte
+      „Absender" und lässt sich unter der Tabelle ändern.
+    </p>
+    <div class="not-prose overflow-x-auto">
+      <table class="table table-sm">
+        <thead>
+          <tr>
+            <th>Adresse</th><th>Bezeichnung</th><th>Erreicht</th>
+            <th>Absender</th><th>Antwort an</th><th>Aktiv</th>
+          </tr>
+        </thead>
+        <tbody>
+          {lists.map((l) => (
+            <tr>
+              <td class="font-mono text-xs whitespace-nowrap">{l.address}@{listDomain()}</td>
+              <td>{l.label}</td>
+              <td class="text-xs">{listRecipientGroups(l).join(', ') || '—'}</td>
+              <td class="text-xs">
+                {l.poster_policy === 'offen'
+                  ? 'alle (offen)'
+                  : l.broadcast
+                    ? 'alle Empfänger'
+                    : [...listPosterGroups(l), ...listSenderPatterns(l)].join(', ') || '—'}
+              </td>
+              <td class="text-xs">{l.reply_mode === 'list' ? 'die Liste' : 'den Absender'}</td>
+              <td>{l.aktiv ? 'ja' : 'nein'}</td>
+            </tr>
+          ))}
+          {lists.length === 0 && (
+            <tr><td colspan="6">Noch keine Verteiler angelegt.</td></tr>
+          )}
+        </tbody>
+      </table>
+    </div>
+
+    {mayEdit && lists.length > 0 && (
+      <>
+        <h3 class="text-lg font-bold mt-6 mb-2">Wer darf an die Listen schreiben?</h3>
+        <p class="mb-4">
+          <strong>Offen</strong> heißt wörtlich offen: <em>jede</em> Absenderadresse
+          im Internet kann an diese Liste schreiben und erreicht damit alle
+          Familien darauf — auch jemand, der die Adresse nur erraten hat. Das ist
+          die Vorgabe, weil ein Verteiler, der nur Eingeweihte durchlässt, genau
+          die Post verliert, auf die es ankommt: vom Schulbüro, von einer
+          Lehrkraft, von einem Elternteil, das gerade von der Arbeit schreibt.
+          Wer nicht durchkommt, merkt es nicht — die Mail landet als
+          Unzustellbarkeitsnachricht bei ihm und nie bei der Klasse.
+        </p>
+        <p class="mb-4">
+          <strong>Eingeschränkt</strong> lässt nur durch, wer in einer
+          Absender-Gruppe steht oder auf eines der Muster passt. Ein Muster ist
+          entweder eine ganze Adresse (<code>anna@example.org</code>) oder eine
+          Domain (<code>*@schule.example</code>) — der Stern ersetzt nur den
+          Teil vor dem @ und trifft keine Subdomains. Geprüft wird der
+          Absender, den der einliefernde Mailserver nennt, nicht der Name im
+          Mailprogramm.
+        </p>
+        <div class="not-prose grid gap-4">
+          {lists.map((l) => (
+            <form method="POST" class="border rounded p-3 grid gap-2">
+              <input type="hidden" name="action" value="list-policy" />
+              <input type="hidden" name="list_address" value={l.address} />
+              <div class="font-mono text-xs">{l.address}@{listDomain()}</div>
+              <label class="form-control">
+                <span class="label-text">Wer darf schreiben?</span>
+                <select class="select select-bordered select-sm" name="poster_policy">
+                  <option value="offen" selected={l.poster_policy === 'offen'}>
+                    offen - jede Adresse
+                  </option>
+                  <option
+                    value="eingeschraenkt"
+                    selected={l.poster_policy === 'eingeschraenkt'}
+                  >
+                    eingeschränkt - nur Gruppen und Muster
+                  </option>
+                </select>
+              </label>
+              <label class="form-control">
+                <span class="label-text">
+                  Erlaubte Absender (ein Muster pro Zeile)
+                </span>
+                <textarea
+                  class="textarea textarea-bordered textarea-sm font-mono"
+                  name="sender_patterns"
+                  rows="3"
+                  placeholder="anna@example.org&#10;*@schule.example"
+                >{listSenderPatterns(l).join('\n')}</textarea>
+              </label>
+              <button type="submit" class="btn btn-sm btn-primary justify-self-start">
+                Speichern
+              </button>
+            </form>
+          ))}
+        </div>
+      </>
+    )}
+
+    {/* ---------------------------------------------------------------- */}
+    <h2 class="text-xl font-bold mt-8 mb-3">Gruppen ({groups.length})</h2>
+    <p class="mb-3">
+      Gruppen sind das, worauf Verteiler zeigen. „Effektiv" zählt die
+      Untergruppen mit — eine Obergruppe erreicht automatisch alle, die in
+      ihren Untergruppen stehen.
+    </p>
+    <div class="not-prose overflow-x-auto">
+      <table class="table table-sm">
+        <thead>
+          <tr>
+            <th>Key</th><th>Bezeichnung</th><th>Direkt</th>
+            <th>Effektiv</th><th>Untergruppen</th><th>Aktiv</th>
+          </tr>
+        </thead>
+        <tbody>
+          {groups.map((g) => (
+            <tr>
+              <td class="font-mono text-xs">{g.key}</td>
+              <td>{g.label}</td>
+              <td>{g.mitglieder}</td>
+              <td>{g.mitglieder_effektiv}</td>
+              <td class="text-xs">{g.children.join(', ') || '—'}</td>
+              <td>{g.aktiv ? 'ja' : 'nein'}</td>
+            </tr>
+          ))}
+          {groups.length === 0 && (
+            <tr><td colspan="6">Noch keine Gruppen angelegt.</td></tr>
+          )}
+        </tbody>
+      </table>
+    </div>
+
+    {/* ---------------------------------------------------------------- */}
+    <h2 class="text-xl font-bold mt-8 mb-3">Mit Claude verbinden (MCP)</h2>
+    <p class="mb-3">
+      Diese Instanz bietet ihre Verwaltung zusätzlich als <strong>MCP-Server</strong>
+      an. In Claude (oder einem anderen MCP-Client) als Server eintragen —
+      danach lässt sich die Klassenliste im Gespräch pflegen, statt Formulare
+      auszufüllen. Die Anmeldung läuft automatisch: der Client registriert sich
+      selbst und schickt Dich hierher zur Zustimmung.
+    </p>
+    <div class="not-prose mb-3">
+      <label class="label-text" for="mcp-url">Server-URL</label>
+      <div class="flex gap-2 items-center">
+        <input
+          id="mcp-url"
+          class="input input-bordered font-mono text-sm flex-1"
+          readonly
+          value={mcpUrl}
+        />
+        <button type="button" class="btn" data-copy={mcpUrl}>Kopieren</button>
+      </div>
+    </div>
+    <p class="text-sm opacity-70 mb-6">
+      Ein Zugang mit <code>{ROLE_MITGLIED}</code> kann über MCP die Verteiler
+      und Gruppen abfragen. Namen und Adressen liefern die Werkzeuge nur an
+      Zugänge mit <code>{ROLE_ADMIN}</code> — dieselbe Grenze wie auf dieser
+      Seite, geprüft an derselben Stelle.
+    </p>
+
+    <h3 class="text-lg font-bold mt-6 mb-3">Verbundene Anwendungen</h3>
+    <div class="not-prose overflow-x-auto">
+      <table class="table table-sm">
+        <thead>
+          <tr><th>Anwendung</th><th>Aktive Zugriffe</th><th>Zuletzt</th><th></th></tr>
+        </thead>
+        <tbody>
+          {clients.map((c) => (
+            <tr>
+              <td>
+                {c.client_name}
+                <span class="block text-xs opacity-50 font-mono">{c.client_id}</span>
+              </td>
+              <td>{c.active_access_tokens} / {c.active_refresh_tokens}</td>
+              <td class="text-xs">{c.last_token_at ?? '—'}</td>
+              <td>
+                <form method="POST" data-confirm={`Zugriff der Anwendung „${c.client_name}“ wirklich beenden? Alle ihre Token werden ungültig, sie muss neu verbunden werden.`}>
+                  <input type="hidden" name="action" value="revoke" />
+                  <input type="hidden" name="client_id" value={c.client_id} />
+                  <button type="submit" class="btn btn-sm btn-error">Zugriff beenden</button>
+                </form>
+              </td>
+            </tr>
+          ))}
+          {clients.length === 0 && (
+            <tr><td colspan="4">Noch keine Anwendung verbunden.</td></tr>
+          )}
+        </tbody>
+      </table>
+    </div>
+    <p class="text-sm opacity-70 mt-2 mb-6">
+      „Zugriff beenden" widerruft alle Token dieser Anwendung — aber nur
+      Deine. Andere Zugänge bleiben unberührt.
+    </p>
+
+    {/* ---------------------------------------------------------------- */}
+    {maySeePersons ? (
+      <>
+        <h2 class="text-xl font-bold mt-8 mb-3">Adressbuch ({mitglieder.length})</h2>
+        <div class="not-prose overflow-x-auto">
+          <table class="table table-sm">
+            <thead>
+              <tr>
+                <th>Name</th><th>E-Mail</th><th>Gruppen</th>{mayEdit && <th></th>}
+              </tr>
+            </thead>
+            <tbody>
+              {mitglieder.map((m) => (
+                <tr>
+                  <td>{m.last_name}, {m.first_name}</td>
+                  <td class="font-mono text-xs">{m.email ?? '—'}</td>
+                  <td class="text-xs">{m.groups.join(', ') || '—'}</td>
+                  {mayEdit && (
+                    <td class="whitespace-nowrap">
+                      <a class="link link-primary text-xs" href={`/verwaltung?bearbeiten=${encodeURIComponent(m.id)}`}>bearbeiten</a>
+                      <form method="POST" class="inline" data-confirm={`„${m.last_name}, ${m.first_name}“ wirklich aus dem Adressbuch löschen? Das lässt sich nicht rückgängig machen.`}>
+                        <input type="hidden" name="action" value="delete" />
+                        <input type="hidden" name="id" value={m.id} />
+                        <button type="submit" class="link link-error text-xs ml-2">löschen</button>
+                      </form>
+                    </td>
+                  )}
+                </tr>
+              ))}
+              {mitglieder.length === 0 && (
+                <tr><td colspan={mayEdit ? 4 : 3}>Noch keine Einträge.</td></tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </>
+    ) : (
+      <>
+        <h2 class="text-xl font-bold mt-8 mb-3">Adressbuch</h2>
+        <p class="mb-6">
+          Namen und E-Mail-Adressen der Familien sind
+          personenbezogen. Sie sehen nur Zugänge mit der Rolle
+          <code>{ROLE_ADMIN}</code> — auch über MCP.
+        </p>
+      </>
+    )}
+
+    {mayEdit && (
+      <>
+        <h2 class="text-xl font-bold mt-8 mb-3">
+          {editing ? `Eintrag bearbeiten: ${editing.id}` : 'Eintrag anlegen'}
+        </h2>
+        <form method="POST" class="not-prose grid gap-3 max-w-xl">
+          <input type="hidden" name="action" value="upsert" />
+          <input type="hidden" name="id" value={editing?.id ?? ''} />
+          <div class="grid grid-cols-2 gap-3">
+            <label class="form-control">
+              <span class="label-text">Vorname</span>
+              <input class="input input-bordered" name="first_name" required value={editing?.first_name ?? ''} />
+            </label>
+            <label class="form-control">
+              <span class="label-text">Nachname</span>
+              <input class="input input-bordered" name="last_name" required value={editing?.last_name ?? ''} />
+            </label>
+          </div>
+          <label class="form-control">
+            <span class="label-text">E-Mail</span>
+            <input class="input input-bordered" type="email" name="email" value={editing?.email ?? ''} />
+          </label>
+          <fieldset class="border rounded p-3">
+            <legend class="label-text px-1">Gruppen</legend>
+            {groups.map((g) => (
+              <label class="flex items-center gap-2">
+                <input type="checkbox" class="checkbox checkbox-sm" name="groups" value={g.key}
+                  checked={editing?.groups.includes(g.key)} />
+                <span>{g.label} <code class="text-xs">{g.key}</code></span>
+              </label>
+            ))}
+            {groups.length === 0 && <p class="text-sm">Noch keine Gruppen — über MCP (<code>upsert_group</code>) anlegen.</p>}
+          </fieldset>
+          <div class="flex gap-3">
+            <button type="submit" class="btn btn-primary">Speichern</button>
+            {editing && <a class="btn btn-ghost" href="/verwaltung">Abbrechen</a>}
+          </div>
+        </form>
+      </>
+    )}
+  </div>
+</Layout>
+
+<script>
+  // Kopieren ohne Framework. Faellt der Clipboard-Zugriff aus (aelterer
+  // Browser, kein sicherer Kontext), bleibt das Feld markierbar — die URL
+  // steht ja lesbar da.
+  // Rueckfrage vor zerstoerenden Aktionen. Bewusst am Formular und nicht am
+  // Knopf: so greift sie auch bei Absenden per Tastatur. Ohne JavaScript
+  // bleibt die Aktion funktionsfaehig, dann eben ohne Rueckfrage — die
+  // Berechtigungspruefung liegt ohnehin auf dem Server.
+  document.querySelectorAll('form[data-confirm]').forEach((form) => {
+    form.addEventListener('submit', (event) => {
+      const frage = form.getAttribute('data-confirm') ?? 'Wirklich fortfahren?'
+      if (!window.confirm(frage)) event.preventDefault()
+    })
+  })
+
+  document.querySelectorAll('[data-copy]').forEach((button) => {
+    button.addEventListener('click', async () => {
+      const value = button.getAttribute('data-copy') ?? ''
+      try {
+        await navigator.clipboard.writeText(value)
+        const before = button.textContent
+        button.textContent = 'Kopiert'
+        setTimeout(() => {
+          button.textContent = before
+        }, 1500)
+      } catch {
+        const field = document.getElementById('mcp-url')
+        if (field instanceof HTMLInputElement) field.select()
+      }
+    })
+  })
+</script>
