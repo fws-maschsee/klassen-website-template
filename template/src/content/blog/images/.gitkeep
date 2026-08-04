@@ -1,0 +1,2 @@
+# Hier kommen Bilder für Berichte hin. Eingebunden werden sie relativ:
+# ![Bildbeschreibung](./images/dateiname.jpeg) - so optimiert Astro sie.
