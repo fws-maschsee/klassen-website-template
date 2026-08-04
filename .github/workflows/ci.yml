@@ -59,6 +59,7 @@ jobs:
           root = sys.argv[1]
           files = sorted(
               glob.glob(os.path.join(root, ".github/workflows/*.yml"))
+              + glob.glob(os.path.join(root, ".github/*.yml"))
               + glob.glob(os.path.join(root, "deploy/*.yaml"))
               + glob.glob(os.path.join(root, "*.yaml"))
               + glob.glob(os.path.join(root, "src/content/blog/*.yml"))

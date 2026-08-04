@@ -1,12 +1,39 @@
-# To get started with Dependabot version updates, you'll need to specify which
-# package ecosystems to update and where the package manifests are located.
-# Please see the documentation for more information:
 # https://docs.github.com/github/administering-a-repository/configuration-options-for-dependency-updates
-# https://containers.dev/guide/dependabot
-
 version: 2
 updates:
   - package-ecosystem: 'devcontainers'
     directory: '/'
     schedule:
       interval: weekly
+
+  - package-ecosystem: 'npm'
+    directory: '/'
+    schedule:
+      interval: monthly
+    open-pull-requests-limit: 3
+    # Ein PR für alle Patch- und Minor-Updates. Einzeln sind es Dutzende, die
+    # niemand durchsieht, und dann bleibt alles liegen.
+    groups:
+      npm:
+        patterns: ['*']
+        update-types: ['minor', 'patch']
+    ignore:
+      # Diese vier hängen zusammen und werden NUR gemeinsam angehoben - in der
+      # Vorlage, nicht hier. Shipyard 0.8 setzt Astro 6 voraus; ein einzelner
+      # Bump zerlegt den Build mit
+      # 'Rollup failed to resolve import "virtual:shipyard/css"'.
+      # Siehe CLAUDE.md, "Fallen, die schon einmal zugeschnappt sind".
+      - dependency-name: '@levino/shipyard-base'
+      - dependency-name: '@levino/shipyard-blog'
+      - dependency-name: '@levino/shipyard-docs'
+      - dependency-name: 'astro'
+        update-types: ['version-update:semver-major']
+      # daisyUI 5 und Tailwind 4 sind Breaking Changes, die zum selben Schritt
+      # gehören.
+      - dependency-name: 'daisyui'
+        update-types: ['version-update:semver-major']
+      - dependency-name: 'tailwindcss'
+        update-types: ['version-update:semver-major']
+      # Die Version muss zu .github/workflows/biome.yml passen. Beides wird
+      # zusammen von Hand angehoben.
+      - dependency-name: '@biomejs/biome'
