@@ -27,7 +27,13 @@ export default defineConfig({
 		// Seit der Adapter im `middleware`-Modus laeuft, gibt es kein
 		// `astro preview` mehr: der Server ist `server.ts` hinter Express. Vorher
 		// muessen die Migrations laufen, sonst findet der Start keine Tabellen.
-		command: 'npm run build && npm run db:migrate && npm start',
+		// `mkdir -p data` gehoert davor: `data/` ist gitignoriert (dort liegen
+		// Namen und Adressen der Eltern), eine frisch erzeugte Klasse hat das
+		// Verzeichnis also nicht. Ohne es scheitert dbmate mit "unable to open
+		// database file", der Server kommt nie hoch, und Playwright meldet nur
+		// "Process from config.webServer was not able to start".
+		command:
+			'mkdir -p data && npm run build && npm run db:migrate && npm start',
 		url: 'http://localhost:4321',
 		reuseExistingServer: true,
 		timeout: 120000,
