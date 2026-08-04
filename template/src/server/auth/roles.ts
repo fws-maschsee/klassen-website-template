@@ -36,7 +36,7 @@ export const ROLE_ADMIN = 'admin'
  *   einzige fremde Adresse.
  *
  * `personen`
- *   Namen, E-Mail-Adressen, Telefonnummern, wer auf welcher Liste steht, wer
+ *   Namen, E-Mail-Adressen, wer auf welcher Liste steht, wer
  *   was bekommen hat. Personenbezogen und deshalb NICHT jedermanns Sache,
  *   auch nicht innerhalb der Klasse: wer in einer Liste steht, geht die
  *   uebrigen Familien nichts an.

@@ -9,10 +9,12 @@ import {
 	deleteMitglied,
 	getMitglied,
 	getMitgliedGroups,
+	listMitglieder,
 	listMitgliederByGroup,
 	removeFromGroup,
 	searchMitglieder,
 	setGroupMembers,
+	uniqueMemberId,
 	upsertMitglied,
 } from '../../src/lib/db/members.js'
 import { createTestDb } from '../helpers/db.js'
@@ -24,6 +26,88 @@ let db: Database
 beforeEach(() => {
 	db = createTestDb()
 	upsertGroup({ key: 'elternvertretung', label: 'Elternvertretung' }, db)
+})
+
+describe('Schema des Adressbuchs', () => {
+	test('kennt nur Name, E-Mail, Zeitstempel und die interne ZITADEL-Nummer', () => {
+		const columns = db
+			.prepare<[], { name: string }>('PRAGMA table_info(mitglieder)')
+			.all()
+			.map((c) => c.name)
+		expect(columns).toEqual([
+			'id',
+			'first_name',
+			'last_name',
+			'email',
+			'created_at',
+			'updated_at',
+			'zitadel_user_id',
+		])
+	})
+
+	test('listMitglieder gibt die ZITADEL-Nummer NICHT heraus', () => {
+		// Sie ist die Verbindung zur Anmeldung und geht weder die Oberflaeche
+		// noch einen MCP-Client etwas an.
+		upsertMitglied({ id: 'p1', first_name: 'Anna', last_name: 'Beispiel' }, db)
+		db.prepare(
+			"UPDATE mitglieder SET zitadel_user_id = 'u1' WHERE id = 'p1'",
+		).run()
+		expect(Object.keys(listMitglieder(db)[0] ?? {})).toEqual([
+			'id',
+			'first_name',
+			'last_name',
+			'email',
+			'created_at',
+			'updated_at',
+		])
+		expect(Object.keys(getMitglied('p1', db) ?? {})).not.toContain(
+			'zitadel_user_id',
+		)
+	})
+
+	test('uniqueMemberId haengt bei Namensgleichheit -2, -3 an', () => {
+		upsertMitglied({ first_name: 'Anna', last_name: 'Beispiel' }, db)
+		expect(uniqueMemberId('Anna', 'Beispiel', db)).toBe('anna-beispiel-2')
+		upsertMitglied(
+			{ id: 'anna-beispiel-2', first_name: 'Anna', last_name: 'Beispiel' },
+			db,
+		)
+		expect(uniqueMemberId('Anna', 'Beispiel', db)).toBe('anna-beispiel-3')
+		// Die eigene Zeile zaehlt beim Umschluesseln nicht als Kollision.
+		expect(uniqueMemberId('Anna', 'Beispiel', db, 'anna-beispiel')).toBe(
+			'anna-beispiel',
+		)
+	})
+
+	test('Index und Trigger haben den Tabellen-Neubau ueberlebt', () => {
+		const objects = db
+			.prepare<[], { name: string }>(
+				"SELECT name FROM sqlite_master WHERE tbl_name = 'mitglieder' AND type IN ('index', 'trigger') ORDER BY name",
+			)
+			.all()
+			.map((o) => o.name)
+		expect(objects).toContain('idx_mitglieder_email')
+		expect(objects).toContain('trg_mitglieder_updated_at')
+	})
+
+	test('der Tabellen-Neubau hat die Gruppenzuordnungen nicht mitgerissen', () => {
+		// Der Neubau in der Migration laeuft mit abgeschalteten
+		// Fremdschluesseln — sonst wuerde das DROP TABLE alle
+		// `group_memberships` per CASCADE mitnehmen. Danach muessen sie wieder
+		// scharf sein, sonst faellt es erst produktiv auf.
+		upsertMitglied(
+			{
+				id: 'p1',
+				first_name: 'Anna',
+				last_name: 'Beispiel',
+				groups: ['eltern'],
+			},
+			db,
+		)
+		expect(db.pragma('foreign_keys', { simple: true })).toBe(1)
+		deleteMitglied('p1', db)
+		expect(listMitgliederByGroup('eltern', db)).toEqual([])
+	})
 })
 
 describe('upsertMitglied', () => {
@@ -45,15 +129,9 @@ describe('upsertMitglied', () => {
 			},
 			db,
 		)
-		upsertMitglied(
-			{
-				id: 'p1',
-				first_name: 'Anna',
-				last_name: 'Beispiel',
-			},
-			db,
-		)
+		upsertMitglied({ id: 'p1', first_name: 'Anna', last_name: 'Muster' }, db)
 		const row = getMitglied('p1', db)
+		expect(row?.last_name).toBe('Muster')
 		expect(row?.email).toBe('anna@example.org')
 	})
 
@@ -68,12 +146,7 @@ describe('upsertMitglied', () => {
 			db,
 		)
 		upsertMitglied(
-			{
-				id: 'p1',
-				first_name: 'Anna',
-				last_name: 'Beispiel',
-				email: null,
-			},
+			{ id: 'p1', first_name: 'Anna', last_name: 'Beispiel', email: null },
 			db,
 		)
 		expect(getMitglied('p1', db)?.email).toBeNull()
@@ -89,23 +162,11 @@ describe('upsertMitglied', () => {
 			},
 			db,
 		)
-		upsertMitglied(
-			{
-				id: 'p1',
-				first_name: 'Anna',
-				last_name: 'Beispiel',
-			},
-			db,
-		)
+		upsertMitglied({ id: 'p1', first_name: 'Anna', last_name: 'Beispiel' }, db)
 		expect(getMitgliedGroups('p1', db)).toEqual(['eltern', 'elternvertretung'])
 
 		upsertMitglied(
-			{
-				id: 'p1',
-				first_name: 'Anna',
-				last_name: 'Beispiel',
-				groups: [],
-			},
+			{ id: 'p1', first_name: 'Anna', last_name: 'Beispiel', groups: [] },
 			db,
 		)
 		expect(getMitgliedGroups('p1', db)).toEqual([])
@@ -114,11 +175,7 @@ describe('upsertMitglied', () => {
 	test('unbekannter Group-Key wird abgelehnt', () => {
 		expect(() =>
 			upsertMitglied(
-				{
-					first_name: 'Anna',
-					last_name: 'Beispiel',
-					groups: ['gibtsnicht'],
-				},
+				{ first_name: 'Anna', last_name: 'Beispiel', groups: ['gibtsnicht'] },
 				db,
 			),
 		).toThrow(/Unbekannte Gruppe/)
@@ -218,11 +275,7 @@ describe('searchMitglieder', () => {
 			db,
 		)
 		upsertMitglied(
-			{
-				id: 'ohne',
-				first_name: 'Otto',
-				last_name: 'Ohnemail',
-			},
+			{ id: 'ohne', first_name: 'Otto', last_name: 'Ohnemail' },
 			db,
 		)
 	})
@@ -237,9 +290,9 @@ describe('searchMitglieder', () => {
 	})
 
 	test('durchsucht auch die E-Mail-Adresse', () => {
-		expect(searchMitglieder({ query: 'doris@' }, db).map((m) => m.id)).toEqual([
-			'doss',
-		])
+		expect(
+			searchMitglieder({ query: 'doris@example' }, db).map((m) => m.id),
+		).toEqual(['doss'])
 	})
 
 	test('filtert nach has_email', () => {

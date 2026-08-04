@@ -21,9 +21,6 @@ import type { Email } from '../src/lib/emails/types.js'
  * ACHTUNG Datenschutz: In diese Dateien gehoeren nur Inhalte, niemals Namen
  * oder Adressen von Eltern. Die Empfaenger kommen ausschliesslich aus der
  * Datenbank (`recipients`).
- *
- * Das Adressbuch kennt nur Vorname, Nachname und E-Mail — es gibt daher
- * bewusst keinen Marker fuer eine Anrede nach Geschlecht.
  */
 const email: Email = {
 	subject: 'Einladung zum Elternabend',

@@ -47,9 +47,17 @@ test.describe('Weboberflaeche', () => {
 		await page.goto('/')
 
 		// Gelandet ist der Browser beim Anmeldedienst, nicht auf der Seite.
-		await page.waitForURL(/\/ui\/v2\/login\//, { timeout: 30_000 })
+		//
+		// Gewartet wird auf die Adresse der KENNUNGS-Seite und dann darauf, dass
+		// es genau EIN Eingabefeld gibt. Waehrend Login v2 clientseitig von
+		// `/login` auf `/loginname` umschaltet, stehen kurz die Felder beider
+		// Seiten im Dokument; ein Zugriff in diesem Moment findet zwei Treffer
+		// und scheitert. Auf dem Entwicklungsrechner war das Fenster zu kurz,
+		// auf dem CI-Runner nicht — genau die Sorte Test, die gelegentlich rot
+		// ist und deshalb nach zwei Wochen ignoriert wird.
+		await page.waitForURL(/\/ui\/v2\/login\/loginname/, { timeout: 30_000 })
 		expect(new URL(page.url()).origin).not.toBe(stack.appOrigin)
-		await expect(page.locator('input[name="loginName"]')).toBeVisible()
+		await expect(page.locator('input[name="loginName"]')).toHaveCount(1)
 	})
 
 	test('ohne Anmeldung bleibt der Kalender erreichbar', async ({ request }) => {

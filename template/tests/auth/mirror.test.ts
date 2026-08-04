@@ -1,15 +1,16 @@
 import type { Database } from 'better-sqlite3'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { upsertMitglied } from '../../src/lib/db/members.js'
+import { listMitglieder, upsertMitglied } from '../../src/lib/db/members.js'
 import { resetGrantsConfig } from '../../src/server/auth/grants.js'
 import { syncMembersFromZitadel } from '../../src/server/auth/mirror.js'
 import { createTestDb } from '../helpers/db.js'
 
 /**
  * Der Abgleich ist die Stelle, an der aus einem ZITADEL-Grant ein Empfaenger
- * wird. Zwei Eigenschaften muessen halten: ein entzogener Grant verschwindet
- * wirklich, und von Hand gepflegte Adressen (Grosseltern, Lehrkraefte)
- * ueberleben den Abgleich.
+ * wird. Drei Eigenschaften muessen halten: ein entzogener Grant verschwindet
+ * wirklich, von Hand gepflegte Adressen (Grosseltern, Lehrkraefte) ueberleben
+ * den Abgleich, und der Schluessel kommt aus dem NAMEN — die ZITADEL-Nummer
+ * steht in `zitadel_user_id` und sonst nirgends.
  *
  * DATENSCHUTZ: ausschliesslich erfundene Namen und example.org-Adressen.
  */
@@ -46,18 +47,89 @@ describe('Abgleich mit ZITADEL', () => {
 		vi.restoreAllMocks()
 	})
 
-	it('legt Empfaenger aus Grants an', async () => {
+	it('legt Empfaenger aus Grants an, mit Schluessel aus dem Namen', async () => {
 		vi.stubGlobal('fetch', grants([user('u1', 'Anna', 'Beispiel')]))
 		const result = await syncMembersFromZitadel(db)
 		expect(result).toMatchObject({ added: 1, removed: 0, total: 1 })
 		const row = db
 			.prepare('SELECT * FROM mitglieder WHERE id = ?')
-			.get('zitadel-u1') as { email: string }
+			.get('anna-beispiel') as { email: string; zitadel_user_id: string }
 		expect(row.email).toBe('anna.beispiel@example.org')
+		// Die Nummer bleibt erhalten — aber in ihrer eigenen Spalte.
+		expect(row.zitadel_user_id).toBe('u1')
 		const inGroup = db
 			.prepare('SELECT COUNT(*) c FROM group_memberships WHERE mitglied_id = ?')
-			.get('zitadel-u1') as { c: number }
+			.get('anna-beispiel') as { c: number }
 		expect(inGroup.c).toBe(1)
+	})
+
+	it('die Nummer bleibt intern: listMitglieder gibt sie nicht heraus', async () => {
+		vi.stubGlobal('fetch', grants([user('u1', 'Anna', 'Beispiel')]))
+		await syncMembersFromZitadel(db)
+		const row = listMitglieder(db)[0]
+		expect(row).toBeDefined()
+		expect(Object.keys(row)).toEqual([
+			'id',
+			'first_name',
+			'last_name',
+			'email',
+			'created_at',
+			'updated_at',
+		])
+	})
+
+	it('bei Namensgleichheit bekommt der Schluessel ein Suffix', async () => {
+		// Geschwisterkinder und gleichnamige Eltern sind moeglich — deshalb gibt
+		// es bewusst keinen UNIQUE-Index auf den Namen.
+		upsertMitglied(
+			{ first_name: 'Anna', last_name: 'Beispiel', email: 'alt@example.org' },
+			db,
+		)
+		vi.stubGlobal('fetch', grants([user('u1', 'Anna', 'Beispiel')]))
+		await syncMembersFromZitadel(db)
+		const ids = listMitglieder(db).map((m) => m.id)
+		expect(ids).toContain('anna-beispiel')
+		expect(ids).toContain('anna-beispiel-2')
+	})
+
+	it('schluesselt Zeilen aus der Zeit davor um und nimmt die Verweise mit', async () => {
+		// So sah eine gespiegelte Zeile vor der Umstellung aus: die Nummer im
+		// Schluessel. Die Migration hat `zitadel_user_id` schon gefuellt.
+		db.prepare(
+			`INSERT INTO mitglieder (id, first_name, last_name, email, zitadel_user_id)
+       VALUES ('zitadel-u1', 'Anna', 'Beispiel', 'anna.beispiel@example.org', 'u1')`,
+		).run()
+		db.prepare(
+			"INSERT INTO group_memberships (group_key, mitglied_id) VALUES ('eltern', 'zitadel-u1')",
+		).run()
+		db.prepare(
+			"INSERT INTO list_suppressions (mitglied_id, list_address, source) VALUES ('zitadel-u1', 'eltern', 'manual')",
+		).run()
+
+		vi.stubGlobal('fetch', grants([user('u1', 'Anna', 'Beispiel')]))
+		const result = await syncMembersFromZitadel(db)
+
+		expect(result).toMatchObject({ rekeyed: 1, rekeyed_with_suffix: 0 })
+		expect(listMitglieder(db).map((m) => m.id)).toEqual(['anna-beispiel'])
+		// Der Opt-out haengt weiter an derselben Person — sonst bekaeme jemand
+		// Post, der ausdruecklich keine wollte.
+		expect(
+			db
+				.prepare('SELECT mitglied_id FROM list_suppressions')
+				.all()
+				.map((r) => (r as { mitglied_id: string }).mitglied_id),
+		).toEqual(['anna-beispiel'])
+		expect(
+			db
+				.prepare(
+					"SELECT COUNT(*) c FROM group_memberships WHERE mitglied_id = 'anna-beispiel'",
+				)
+				.get(),
+		).toMatchObject({ c: 1 })
+
+		// Zweiter Durchlauf: nichts mehr zu tun, der Schritt ist idempotent.
+		const again = await syncMembersFromZitadel(db)
+		expect(again).toMatchObject({ rekeyed: 0, added: 0 })
 	})
 
 	it('entfernt Empfaenger, deren Grant weg ist', async () => {
@@ -67,7 +139,7 @@ describe('Abgleich mit ZITADEL', () => {
 		const result = await syncMembersFromZitadel(db)
 		expect(result.removed).toBe(1)
 		expect(
-			db.prepare('SELECT * FROM mitglieder WHERE id = ?').get('zitadel-u1'),
+			db.prepare('SELECT * FROM mitglieder WHERE id = ?').get('anna-beispiel'),
 		).toBeUndefined()
 	})
 
@@ -101,9 +173,11 @@ describe('Abgleich mit ZITADEL', () => {
 		)
 		const result = await syncMembersFromZitadel(db)
 		expect(result).toMatchObject({ added: 0, updated: 1, total: 1 })
-		const count = db
-			.prepare("SELECT COUNT(*) c FROM mitglieder WHERE id LIKE 'zitadel-%'")
-			.get() as { c: number }
-		expect(count.c).toBe(1)
+		// Gefunden wird ueber die Nummer, nicht ueber den Namen: der Schluessel
+		// bleibt deshalb der alte, obwohl der Nachname sich geaendert hat.
+		const rows = listMitglieder(db)
+		expect(rows).toHaveLength(1)
+		expect(rows[0]?.id).toBe('anna-beispiel')
+		expect(rows[0]?.email).toBe('neu@example.org')
 	})
 })

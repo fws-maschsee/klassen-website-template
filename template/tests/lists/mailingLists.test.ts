@@ -4,9 +4,10 @@ import { addSubgroup, upsertGroup } from '../../src/lib/db/groups.js'
 import {
 	getMailingList,
 	isSenderAllowed,
-	matchesSenderPattern,
+	listSenderPatterns,
 	resolveAllowedSenders,
 	resolveListRecipients,
+	setListPosterRules,
 	upsertMailingList,
 } from '../../src/lib/db/mailingLists.js'
 import { addToGroup, upsertMitglied } from '../../src/lib/db/members.js'
@@ -170,25 +171,15 @@ describe('Absenderberechtigung', () => {
 		])
 	})
 
-	test('offen ist die Vorgabe: jede Adresse darf posten', () => {
-		const list = upsertMailingList(
-			{ address: 'offen', label: 'Offen', recipient_groups: ['eltern'] },
-			db,
-		)
-		expect(list.poster_policy).toBe('offen')
-		expect(isSenderAllowed(list, 'irgendwer@fremde.example', db)).toBe(true)
-		// Was keine Adresse ist, kommt trotzdem nicht durch.
-		expect(isSenderAllowed(list, 'keine-adresse', db)).toBe(false)
-	})
-
-	test('eingeschraenkt: nur poster_groups und sender_patterns duerfen posten', () => {
+	test('nur poster_groups und sender_patterns duerfen posten', () => {
 		const list = upsertMailingList(
 			{
 				address: 'info',
 				label: 'Info',
 				recipient_groups: ['eltern'],
-				poster_policy: 'eingeschraenkt',
 				poster_groups: ['elternvertretung'],
+
+				poster_policy: 'eingeschraenkt',
 				sender_patterns: ['schulbuero@example.org'],
 			},
 			db,
@@ -205,8 +196,9 @@ describe('Absenderberechtigung', () => {
 				address: 'diskussion',
 				label: 'Diskussion',
 				recipient_groups: ['eltern'],
-				poster_policy: 'eingeschraenkt',
 				poster_groups: [],
+
+				poster_policy: 'eingeschraenkt',
 				broadcast: true,
 				reply_mode: 'list',
 			},
@@ -216,7 +208,7 @@ describe('Absenderberechtigung', () => {
 		expect(isSenderAllowed(list, 'fremd@example.org', db)).toBe(false)
 	})
 
-	test('eingeschraenkt ohne Gruppen und ohne Muster: niemand darf posten', () => {
+	test('eingeschraenkt und ohne alles: niemand darf posten', () => {
 		const list = upsertMailingList(
 			{
 				address: 'stumm',
@@ -238,8 +230,9 @@ describe('Absenderberechtigung', () => {
 				address: 'info2',
 				label: 'Info',
 				recipient_groups: ['eltern'],
-				poster_policy: 'eingeschraenkt',
 				poster_groups: ['vorstandsteam'],
+
+				poster_policy: 'eingeschraenkt',
 			},
 			db,
 		)
@@ -261,44 +254,162 @@ describe('Absenderberechtigung', () => {
 		suppressAddress({ email: 'anna@example.org', source: 'bounce' }, db)
 		expect(isSenderAllowed(list, 'anna@example.org', db)).toBe(false)
 	})
+})
 
-	test('Domain-Muster erlaubt eine ganze Domain, aber keine Subdomain', () => {
-		const list = upsertMailingList(
-			{
-				address: 'schule',
-				label: 'Schule',
-				recipient_groups: ['eltern'],
-				poster_policy: 'eingeschraenkt',
-				sender_patterns: ['*@schule.example'],
-			},
-			db,
-		)
-		expect(isSenderAllowed(list, 'buero@schule.example', db)).toBe(true)
-		expect(isSenderAllowed(list, 'BUERO@Schule.Example', db)).toBe(true)
-		// Eine Subdomain ist eine andere Domain — sonst waere die Freigabe der
-		// Schuldomain zugleich die Freigabe jeder Subdomain darunter.
-		expect(isSenderAllowed(list, 'buero@mail.schule.example', db)).toBe(false)
-		expect(isSenderAllowed(list, 'buero@boese-schule.example', db)).toBe(false)
+describe('Migration auf poster_policy', () => {
+	/**
+	 * Der wichtigste Test dieser Datei: Die Migration darf das Verhalten der
+	 * BEIDEN LAUFENDEN Klassen nicht anfassen. Eine Liste, die es vor der
+	 * Migration schon gab, muss danach genauso streng sein wie vorher — offen
+	 * wird nur, was jemand ausdruecklich umstellt. Simuliert wird der Bestand,
+	 * indem die Zeile am ORM vorbei so geschrieben wird, wie die alte
+	 * Anwendung sie geschrieben haette (ohne poster_policy).
+	 */
+	test('eine Liste aus der Zeit davor bleibt eingeschraenkt', () => {
+		person('anna', 'anna@example.org')
+		person('vertreterin', 'vertreterin@example.org', [
+			'eltern',
+			'elternvertretung',
+		])
+		db.prepare(
+			`INSERT INTO mailing_lists (address, label, recipient_groups, poster_groups, sender_patterns, poster_policy)
+       VALUES ('alt', 'Alt', '["eltern"]', '["elternvertretung"]', '[]', 'eingeschraenkt')`,
+		).run()
+		const list = getMailingList('alt', db)
+		if (!list) throw new Error('Liste nicht angelegt')
+		expect(list.poster_policy).toBe('eingeschraenkt')
+		expect(isSenderAllowed(list, 'vertreterin@example.org', db)).toBe(true)
+		expect(isSenderAllowed(list, 'wildfremd@irgendwo.example', db)).toBe(false)
 	})
 
-	test('matchesSenderPattern: die Formen einzeln', () => {
-		expect(matchesSenderPattern('anna@example.org', 'anna@example.org')).toBe(
+	test('die Spalte selbst haelt nur die beiden erlaubten Werte aus', () => {
+		expect(() =>
+			db
+				.prepare(
+					`INSERT INTO mailing_lists (address, label, poster_policy)
+           VALUES ('quatsch', 'Quatsch', 'vielleicht')`,
+				)
+				.run(),
+		).toThrow(/CHECK/)
+	})
+
+	test('der Spalten-Default ist offen — fuer alles, was neu entsteht', () => {
+		db.prepare(
+			"INSERT INTO mailing_lists (address, label) VALUES ('frisch', 'Frisch')",
+		).run()
+		expect(getMailingList('frisch', db)?.poster_policy).toBe('offen')
+	})
+})
+
+describe('poster_policy', () => {
+	beforeEach(() => {
+		person('anna', 'anna@example.org')
+	})
+
+	const liste = (address: string, rest = {}) =>
+		upsertMailingList(
+			{ address, label: address, recipient_groups: ['eltern'], ...rest },
+			db,
+		)
+
+	test('neue Listen sind offen — das ist die Vorgabe', () => {
+		expect(liste('neu').poster_policy).toBe('offen')
+	})
+
+	test('offen laesst auch voellig Fremde schreiben', () => {
+		const list = liste('offen')
+		expect(isSenderAllowed(list, 'wildfremd@irgendwo.example', db)).toBe(true)
+		// Auch ohne jede Poster-Gruppe und ohne jedes Muster.
+		expect(resolveAllowedSenders(list, db).size).toBe(0)
+	})
+
+	test('eingeschraenkt lehnt Fremdabsender ab', () => {
+		const list = liste('zu', { poster_policy: 'eingeschraenkt' })
+		expect(isSenderAllowed(list, 'wildfremd@irgendwo.example', db)).toBe(false)
+	})
+
+	test('eine volle Adresse im Muster trifft genau diese Adresse', () => {
+		const list = liste('voll', {
+			poster_policy: 'eingeschraenkt',
+			sender_patterns: ['schulbuero@schule.example'],
+		})
+		expect(isSenderAllowed(list, 'schulbuero@schule.example', db)).toBe(true)
+		expect(isSenderAllowed(list, 'anders@schule.example', db)).toBe(false)
+	})
+
+	test('*@domain trifft jede Adresse dieser Domain', () => {
+		const list = liste('domain', {
+			poster_policy: 'eingeschraenkt',
+			sender_patterns: ['*@schule.example'],
+		})
+		expect(isSenderAllowed(list, 'wer@schule.example', db)).toBe(true)
+		expect(isSenderAllowed(list, 'jemand.anderes@schule.example', db)).toBe(
 			true,
 		)
-		expect(matchesSenderPattern('ANNA@Example.org', ' anna@example.org ')).toBe(
-			true,
+		expect(isSenderAllowed(list, 'wer@example.org', db)).toBe(false)
+	})
+
+	test('*@domain trifft NICHT eine Subdomain davon', () => {
+		// Sonst duerfte, wer irgendeine Subdomain kontrolliert, an alle Familien
+		// schreiben. Das soll ueberraschen, wenn man es erwartet — nicht, wenn
+		// man es nicht erwartet.
+		const list = liste('sub', {
+			poster_policy: 'eingeschraenkt',
+			sender_patterns: ['*@example.org'],
+		})
+		expect(isSenderAllowed(list, 'wer@example.org', db)).toBe(true)
+		expect(isSenderAllowed(list, 'wer@mail.example.org', db)).toBe(false)
+		expect(isSenderAllowed(list, 'wer@example.org.example', db)).toBe(false)
+	})
+
+	test('Grossschreibung ist egal — beim Muster wie bei der Adresse', () => {
+		const list = liste('gross', {
+			poster_policy: 'eingeschraenkt',
+			sender_patterns: ['*@Schule.EXAMPLE', 'Anna@Example.ORG'],
+		})
+		expect(isSenderAllowed(list, 'WER@schule.example', db)).toBe(true)
+		expect(isSenderAllowed(list, 'ANNA@example.org', db)).toBe(true)
+	})
+
+	test('unsinnige Muster werden beim Speichern abgelehnt', () => {
+		for (const kaputt of [
+			'*',
+			'*@',
+			'ohne-at',
+			'an*@example.org',
+			'@example.org',
+		]) {
+			expect(() =>
+				liste('kaputt', {
+					poster_policy: 'eingeschraenkt',
+					sender_patterns: [kaputt],
+				}),
+			).toThrow(/Absender-Muster|Domain-Platzhalter/)
+		}
+	})
+
+	test('setListPosterRules aendert nur Richtlinie und Muster', () => {
+		const before = liste('umstellen', {
+			poster_policy: 'eingeschraenkt',
+			poster_groups: ['elternvertretung'],
+			subject_prefix: '[Test]',
+		})
+		const after = setListPosterRules(
+			'umstellen',
+			'offen',
+			['*@schule.example'],
+			db,
 		)
-		expect(matchesSenderPattern('anna@example.org', 'bert@example.org')).toBe(
-			false,
+		expect(after.poster_policy).toBe('offen')
+		expect(listSenderPatterns(after)).toEqual(['*@schule.example'])
+		expect(after.poster_groups).toBe(before.poster_groups)
+		expect(after.subject_prefix).toBe('[Test]')
+	})
+
+	test('setListPosterRules wirft bei unbekannter Liste', () => {
+		expect(() => setListPosterRules('gibtsnicht', 'offen', [], db)).toThrow(
+			/Unbekannte Liste/,
 		)
-		expect(matchesSenderPattern('anna@example.org', '*@example.org')).toBe(true)
-		expect(matchesSenderPattern('anna@a.example.org', '*@example.org')).toBe(
-			false,
-		)
-		// Ein leeres oder sinnloses Muster darf nie alles treffen.
-		expect(matchesSenderPattern('anna@example.org', '')).toBe(false)
-		expect(matchesSenderPattern('anna@example.org', '*@')).toBe(false)
-		expect(matchesSenderPattern('anna@example.org', '*')).toBe(false)
 	})
 })
 

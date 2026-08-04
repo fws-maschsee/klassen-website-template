@@ -61,10 +61,25 @@ describe('Rendern und Personalisieren', () => {
 		const rendered = await renderForRecipient(email, mitglied)
 
 		expect(rendered.subject).toBe('Testmail fuer Anna')
-		// Eine Anredeform fuer alle, aus dem Vornamen.
+		// `{{anrede}}` spricht ueber den Vornamen an, ohne Geschlechtsangabe.
 		expect(rendered.html).toContain('Hallo Anna,')
 		expect(rendered.text).toContain('Hallo Anna,')
 		expect(rendered.html).toContain('<html')
+	})
+
+	test('die Anrede kommt ohne Geschlechtsangabe aus', async () => {
+		const mitglied = upsertMitglied(
+			{
+				id: 'bert',
+				first_name: 'Bert',
+				last_name: 'Beispiel',
+			},
+			db,
+		)
+		const email = await loadEmail('2026-08-01-testmail', FIXTURES)
+		const rendered = await renderForRecipient(email, mitglied)
+		expect(rendered.text).toContain('Hallo Bert,')
+		expect(rendered.text).not.toMatch(/Herr|Frau|Sehr geehrte/)
 	})
 })
 

@@ -287,7 +287,16 @@ test.describe('MCP-Endpunkt', () => {
 			zeile,
 			'die verbundene Anwendung steht in der Verwaltung',
 		).toBeVisible()
+		// Die Oberflaeche fragt vor dem Widerruf zurueck (`window.confirm`).
+		// Playwright weist Dialoge sonst stillschweigend ab — der Klick liefe
+		// dann ins Leere und der Test schluege mit „Token lebt noch" fehl, was
+		// nach einem Fehler im Widerruf aussaehe und keiner waere. Der Handler
+		// stoert nicht, falls die Rueckfrage einmal wegfaellt.
+		page.on('dialog', (dialog) => dialog.accept())
 		await zeile.getByRole('button', { name: 'Zugriff beenden' }).click()
+		// Das Formular schickt ab und die Seite laedt neu; erst danach ist der
+		// Widerruf wirklich durch.
+		await page.waitForLoadState('networkidle')
 
 		// Erstens: das Token ist wirklich tot. Ob die Absage dabei das richtige
 		// 401 traegt, prueft weiter oben ein eigener Test — hier zaehlt nur,

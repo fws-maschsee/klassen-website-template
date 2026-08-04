@@ -1,4 +1,5 @@
 import type { OAuthRegisteredClientsStore } from '@modelcontextprotocol/sdk/server/auth/clients.js'
+import { InvalidTokenError } from '@modelcontextprotocol/sdk/server/auth/errors.js'
 import type {
 	AuthorizationParams,
 	OAuthServerProvider,
@@ -183,7 +184,16 @@ export const mcpOAuthProvider: OAuthServerProvider = {
 
 	async verifyAccessToken(token: string): Promise<AuthInfo> {
 		const access = verifyAccessToken(token)
-		if (!access) throw new Error('invalid_token')
+		if (!access) {
+			// `InvalidTokenError` und nicht irgendein `Error`: nur diese Klasse
+			// erkennt die Bearer-Middleware des SDK und beantwortet sie mit 401
+			// plus `WWW-Authenticate`. Ein gewoehnlicher Fehler wird dort zu
+			// HTTP 500 — und ein MCP-Client, der 500 sieht, haelt den Server fuer
+			// gestoert und versucht es wieder, statt sich ein neues Token zu
+			// holen. Gemessen an einem widerrufenen Token: der Widerruf wirkte,
+			// aber der Client erfuhr nie, dass er sich neu autorisieren muss.
+			throw new InvalidTokenError('Token unbekannt, abgelaufen oder widerrufen')
+		}
 		return accessTokenToAuthInfo(access, token)
 	},
 

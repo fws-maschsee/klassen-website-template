@@ -13,7 +13,7 @@
  *   erwartet, und die Fehler bestanden gerade darin, dass die Wirklichkeit
  *   anders war.
  *
- *   Eine laufende Instanz im Netz (`id.fws-maschsee-test.de`) scheidet
+ *   Eine laufende Instanz im Netz (`id.example.org`) scheidet
  *   ebenfalls aus. Diese Tests VERGEBEN und ENTZIEHEN Rollen — gegen einen
  *   produktiven Verzeichnisdienst gerichtet heisst das, dass ein
  *   fehlgeschlagener Lauf irgendwann einem echten Elternteil den Zugang
@@ -35,6 +35,7 @@
 import { spawn, spawnSync } from 'node:child_process'
 import { randomBytes } from 'node:crypto'
 import {
+	chmodSync,
 	existsSync,
 	mkdirSync,
 	openSync,
@@ -98,8 +99,8 @@ const MASTERKEY = 'MasterkeyNeedsToHave32Characters'
  * gleichnamigen Rollen sich nicht gegenseitig aufsperren — nicht, wie die
  * Projekte im Betrieb heissen.
  */
-const OWN_PROJECT = 'klasse-wiesen'
-const OTHER_PROJECT = 'klasse-christophers'
+const OWN_PROJECT = 'klasse-musterfrau'
+const OTHER_PROJECT = 'klasse-nachbar'
 
 // --- kleine Helfer ---------------------------------------------------------
 
@@ -120,7 +121,31 @@ const run = (command, args, options = {}) => {
 
 const docker = (args, options = {}) => run('docker', args, options)
 
+/**
+ * Logs eines Containers, BEIDE Stroeme.
+ *
+ * ZITADEL und PostgreSQL schreiben nach stderr. Wer hier nur stdout einsammelt,
+ * bekommt bei einem Fehlschlag eine leere Ausgabe zu sehen und sucht den Fehler
+ * anschliessend an der falschen Stelle — genau das ist beim ersten CI-Lauf
+ * passiert.
+ */
+const containerLogs = (name) => {
+	const result = spawnSync('docker', ['logs', '--tail', '200', name], {
+		encoding: 'utf8',
+	})
+	return `${result.stdout ?? ''}${result.stderr ?? ''}`.trim()
+}
+
+/** Laeuft der Container noch? */
+const isRunning = (name) =>
+	docker(['inspect', '-f', '{{.State.Running}}', name], {
+		allowFailure: true,
+	}) === 'true'
+
 const sleep = (ms) => new Promise((done) => setTimeout(done, ms))
+
+/** Weiterwarten ist sinnlos — die Ursache steht schon fest. */
+class AbortSetup extends Error {}
 
 /**
  * Wartet auf eine Bedingung. Der `label` landet in der Fehlermeldung — eine
@@ -138,6 +163,7 @@ const waitFor = async (label, check, timeoutMs = 180_000) => {
 				return
 			}
 		} catch (error) {
+			if (error instanceof AbortSetup) throw error
 			lastError = String(error)
 		}
 		await sleep(500)
@@ -192,15 +218,30 @@ const startPostgres = () => {
 		'/var/lib/postgresql/data',
 		POSTGRES_IMAGE,
 	])
+	// Bewusst ueber TCP (`-h 127.0.0.1`) und nicht ueber den Unix-Socket.
+	// Das offizielle Image startet beim ersten Mal einen VORLAEUFIGEN Server,
+	// der nur auf dem Socket lauscht, spielt die Initialisierung ein und
+	// startet danach neu. Ein `pg_isready` ohne Host meldet in dieser Phase
+	// schon Erfolg — ZITADEL startet dann los, findet keinen erreichbaren
+	// Server und beendet sich. Genau so ist der erste CI-Lauf gescheitert:
+	// lokal war das Fenster zu kurz, um aufzufallen, auf dem Runner nicht.
 	return waitFor(
 		'postgres',
 		() =>
 			spawnSync(
 				'docker',
-				['exec', names.postgres, 'pg_isready', '-U', 'postgres'],
-				{
-					encoding: 'utf8',
-				},
+				[
+					'exec',
+					names.postgres,
+					'pg_isready',
+					'-h',
+					'127.0.0.1',
+					'-p',
+					'5432',
+					'-U',
+					'postgres',
+				],
+				{ encoding: 'utf8' },
 			).status === 0,
 		120_000,
 	)
@@ -210,6 +251,15 @@ const startZitadel = async () => {
 	docker(['rm', '-f', names.zitadel], { allowFailure: true })
 	rmSync(patDir, { recursive: true, force: true })
 	mkdirSync(patDir, { recursive: true })
+	// Fuer alle beschreibbar, und das ist noetig: ZITADEL laeuft im Container
+	// unter einer eigenen Benutzerkennung und legt hier sein Personal Access
+	// Token ab. Auf dem CI-Runner gehoert das Verzeichnis einer anderen Kennung
+	// als der im Container, und der Aufbau starb mit
+	// "open /pat/admin.pat: permission denied" — auf dem Entwicklungsrechner
+	// fielen beide Kennungen zufaellig zusammen und es fiel nicht auf.
+	// Unbedenklich: das Verzeichnis liegt im Arbeitsbaum eines Testlaufs und
+	// wird beim naechsten `up` geloescht.
+	chmodSync(patDir, 0o777)
 	docker([
 		'run',
 		'-d',
@@ -290,6 +340,15 @@ const startZitadel = async () => {
 	])
 
 	await waitFor('zitadel (bereit)', async () => {
+		// Erst nachsehen, ob es ueberhaupt noch etwas gibt, worauf man warten
+		// koennte. Ohne diese Pruefung laeuft der Aufbau in die volle
+		// Zeitgrenze und meldet "nicht bereit" — waehrend der Container laengst
+		// mit einer klaren Begruendung im Log gestorben ist.
+		if (!isRunning(names.zitadel)) {
+			throw new AbortSetup(
+				`Der ZITADEL-Container ist beendet. Sein Log:\n${containerLogs(names.zitadel)}`,
+			)
+		}
 		const response = await fetch(`${issuer}/debug/ready`)
 		return response.status === 200 && existsSync(resolve(patDir, 'admin.pat'))
 	})
@@ -466,6 +525,47 @@ const createOidcClient = async (adminToken, projectId) =>
 	})
 
 /**
+ * Der Dienstzugang, mit dem die ANWENDUNG bei ZITADEL nachfragt, wer was darf.
+ *
+ * Seit die Rollen nicht mehr im Token stehen, sondern bei jeder Anfrage frisch
+ * erfragt werden (`src/server/auth/grants.ts`), braucht die Anwendung ein
+ * eigenes Credential. Im Betrieb kommt es aus einem SealedSecret; hier stellt
+ * die Wegwerf-Instanz es sich selbst aus. Ohne diesen Schritt antwortet die
+ * Anwendung auf jeder geschuetzten Seite mit 503 „Berechtigungspruefung nicht
+ * konfiguriert" — richtig so, aber schwer zu deuten, wenn man es nicht
+ * erwartet.
+ *
+ * `ORG_USER_MANAGER` statt `ORG_OWNER`: die Anwendung muss Nutzer und deren
+ * Grants LESEN, sonst nichts. Ein Testaufbau, der dem Dienst mehr gibt als
+ * noetig, verschweigt genau den Fehler, der im Betrieb weh taete — dass die
+ * hinterlegte Rolle zu schwach ist.
+ */
+const createAppServiceUser = async (adminToken) => {
+	const machine = await api(
+		adminToken,
+		'POST',
+		'/management/v1/users/machine',
+		{
+			userName: 'e2e-app',
+			name: 'E2E Anwendung',
+			description: 'Fragt Berechtigungen bei ZITADEL ab',
+			accessTokenType: 'ACCESS_TOKEN_TYPE_BEARER',
+		},
+	)
+	const pat = await api(
+		adminToken,
+		'POST',
+		`/management/v1/users/${machine.userId}/pats`,
+		{ expirationDate: '2999-01-01T00:00:00Z' },
+	)
+	await api(adminToken, 'POST', '/management/v1/orgs/me/members', {
+		userId: machine.userId,
+		roles: ['ORG_USER_MANAGER'],
+	})
+	return pat.token
+}
+
+/**
  * Testnutzer. Erfundene Namen, `@example.invalid` als Domain: die ist per RFC
  * 2606 garantiert nicht aufloesbar, an sie kann also auch versehentlich keine
  * Mail gehen. Echte Elterndaten haben in Tests nichts verloren.
@@ -521,6 +621,11 @@ const setup = async () => {
 	const ownProjectId = await createProject(adminToken, OWN_PROJECT)
 	const otherProjectId = await createProject(adminToken, OTHER_PROJECT)
 	const client = await createOidcClient(adminToken, ownProjectId)
+
+	// Die Org, in der alles liegt. Die Anwendung schickt ihre ID als
+	// `x-zitadel-orgid` mit — ohne sie sucht ZITADEL in der falschen.
+	const org = await api(adminToken, 'GET', '/management/v1/orgs/me')
+	const appServiceToken = await createAppServiceUser(adminToken)
 
 	const users = {}
 
@@ -603,6 +708,8 @@ const setup = async () => {
 		loginBaseUri,
 		appOrigin,
 		adminToken,
+		orgId: org.org.id,
+		appServiceToken,
 		ownProjectId,
 		otherProjectId,
 		clientId: client.clientId,
@@ -631,6 +738,13 @@ const appEnv = (state) => ({
 	// beides daran, wie das Framework gerade den Host-Header auslegt.
 	OIDC_PUBLIC_ORIGIN: appOrigin,
 	PUBLIC_BASE_URL: appOrigin,
+	// Womit die Anwendung bei JEDER Anfrage nachfragt, wer was darf. Die
+	// Rollen stehen bewusst nicht mehr im Token — sonst waere ein Entzug
+	// wieder eine Momentaufnahme (src/server/auth/grants.ts).
+	ZITADEL_ISSUER: state.issuer,
+	ZITADEL_ORG_ID: state.orgId,
+	ZITADEL_PROJECT_ID: state.ownProjectId,
+	ZITADEL_SERVICE_TOKEN: state.appServiceToken,
 	MCP_INSTANCE_NAME: OWN_PROJECT,
 	MCP_INSTANCE_LABEL: OWN_PROJECT,
 	DB_PATH: './data/authz-e2e.db',
@@ -679,14 +793,49 @@ const buildAndStartApp = async (state) => {
 
 // --- Kommandos -------------------------------------------------------------
 
+/**
+ * Antwortet auf dem Port der Anwendung schon irgendetwas?
+ *
+ * Der Grund fuer diese Pruefung, an einem echten Vorfall gelernt: Nach einem
+ * abgebrochenen Lauf lief die Anwendung des SCHWESTER-Repos noch und hielt
+ * Port 4322. Der neue Lauf startete seine eigene daneben, die den Port nicht
+ * mehr bekam — und alle Anfragen gingen an die alte, die gegen eine laengst
+ * geloeschte ZITADEL-Instanz konfiguriert war. Ergebnis: sechzehn rote Tests
+ * und kein Hinweis worauf. Lieber gar nicht erst starten.
+ */
+const portInUse = async () => {
+	try {
+		await fetch(appOrigin, {
+			redirect: 'manual',
+			signal: AbortSignal.timeout(2000),
+		})
+		return true
+	} catch {
+		return false
+	}
+}
+
 const up = async () => {
+	// `up` raeumt zuerst auf. Damit ist es beliebig oft wiederholbar, und ein
+	// Rest vom letzten Lauf kann sich nicht in diesen hineinmischen.
+	down({ quiet: true })
+
+	if (await portInUse()) {
+		throw new Error(
+			`Auf ${appOrigin} antwortet bereits etwas, das dieser Lauf nicht gestartet hat.\n` +
+				'Vermutlich laeuft die Anwendung eines abgebrochenen Laufs (auch aus einem\n' +
+				'anderen Klassen-Repo) noch. Sie beenden, dann erneut versuchen — oder mit\n' +
+				'AUTHZ_APP_PORT einen anderen Port waehlen.',
+		)
+	}
+
 	const state = await setup()
 	state.appPid = await buildAndStartApp(state)
 	writeFileSync(statePath, `${JSON.stringify(state, null, 2)}\n`)
 	log(`bereit. Zustand in ${statePath}`)
 }
 
-const down = () => {
+const down = ({ quiet = false } = {}) => {
 	if (existsSync(statePath)) {
 		const state = JSON.parse(readFileSync(statePath, 'utf8'))
 		if (state.appPid) {
@@ -703,13 +852,17 @@ const down = () => {
 	for (const name of Object.values(names)) {
 		docker(['rm', '-f', name], { allowFailure: true })
 	}
-	log('abgeraeumt')
+	if (!quiet) log('abgeraeumt')
 }
 
 const logs = () => {
+	console.log('===== docker ps -a =====')
+	console.log(
+		docker(['ps', '-a', '--filter', 'name=fws-authz'], { allowFailure: true }),
+	)
 	for (const name of Object.values(names)) {
 		console.log(`\n===== docker logs ${name} =====`)
-		console.log(docker(['logs', '--tail', '200', name], { allowFailure: true }))
+		console.log(containerLogs(name))
 	}
 	console.log('\n===== Anwendung =====')
 	if (existsSync(appLogPath)) console.log(readFileSync(appLogPath, 'utf8'))

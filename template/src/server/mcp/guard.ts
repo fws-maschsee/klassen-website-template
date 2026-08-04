@@ -188,7 +188,7 @@ export const registerWriteTool = <
 
 /**
  * Werkzeug, das PERSONENBEZOGENE Daten herausgibt — Namen, Adressen,
- * Telefonnummern, wer auf welcher Liste steht, wer was bekommen hat.
+ * wer auf welcher Liste steht, wer was bekommen hat.
  *
  * Bewusst getrennt von `registerWriteTool`, obwohl heute dieselbe Rolle
  * dahintersteht: an der Aufrufstelle soll ablesbar sein, dass hier Daten

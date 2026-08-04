@@ -1,27 +1,19 @@
 import type { MitgliedRow } from '../db/types.js'
 import type { Block, Email, EmailTemplate } from '../emails/types.js'
+import { personalizedAnrede } from './anrede.js'
 import { compile } from './compile.js'
 import { template } from './template.js'
 
 /**
- * Anrede einer Rundmail. Bewusst EINE Form fuer alle: "Hallo Anna,".
- *
- * Das Adressbuch kennt keine Anrede und kein Geschlecht (siehe Migration
- * `create_mitglieder`), und das ist kein Mangel, den diese Datei ausgleichen
- * muesste. Ein Verteiler einer Klassenelternschaft braucht die Unterscheidung
- * nicht, und wer sie erhebt, muss sie auch pflegen und begruenden. Wer in
- * seiner Klasse foermlich schreiben will, formuliert die Anrede im Text der
- * Mail aus.
- */
-export const personalizedAnrede = (mitglied: MitgliedRow): string =>
-	`Hallo ${mitglied.first_name},`
-
-/**
  * Personalisierungs-Marker, die in jedem Textfeld einer Rundmail ersetzt
  * werden:
- *   {{anrede}}      "Hallo Anna,"
+ *   {{anrede}}      "Hallo <Vorname>,"
  *   {{firstName}}   Vorname
  *   {{lastName}}    Nachname
+ *
+ * Frueher gab es zusaetzlich `{{anredeDu}}` und `{{salutation}}` sowie den
+ * Schalter `duzen` an der Mail. Beides hing an der Spalte `salutation` im
+ * Adressbuch, die entfallen ist — es gibt jetzt nur noch eine Ansprache.
  */
 const personalizeString = (text: string, mitglied: MitgliedRow): string =>
 	text

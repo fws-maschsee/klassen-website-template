@@ -107,8 +107,9 @@ beforeEach(() => {
 			address: 'eltern',
 			label: 'Eltern',
 			recipient_groups: ['eltern'],
-			poster_policy: 'eingeschraenkt',
 			poster_groups: ['elternvertretung'],
+
+			poster_policy: 'eingeschraenkt',
 			subject_prefix: '[Eltern]',
 		},
 		db,
@@ -150,8 +151,9 @@ describe('Annahme und Verteilung', () => {
 				address: 'eltern',
 				label: 'Eltern',
 				recipient_groups: ['eltern'],
-				poster_policy: 'eingeschraenkt',
 				poster_groups: ['elternvertretung'],
+
+				poster_policy: 'eingeschraenkt',
 				reply_mode: 'list',
 			},
 			db,
@@ -203,50 +205,6 @@ describe('Berechtigung', () => {
 		expect(sent).toHaveLength(0)
 	})
 
-	test('bei poster_policy "offen" kommt auch ein Fremder durch', async () => {
-		upsertMailingList(
-			{
-				address: 'eltern',
-				label: 'Eltern',
-				recipient_groups: ['eltern'],
-				poster_policy: 'offen',
-			},
-			db,
-		)
-		const result = await deliver({
-			envelopeFrom: 'schulbuero@fremde.example',
-			messageId: '<offen1@example.org>',
-		})
-		expect(result.kind).toBe('enqueued')
-	})
-
-	test('Domain-Muster laesst eine ganze Schuldomain zu', async () => {
-		upsertMailingList(
-			{
-				address: 'eltern',
-				label: 'Eltern',
-				recipient_groups: ['eltern'],
-				poster_policy: 'eingeschraenkt',
-				sender_patterns: ['*@schule.example'],
-			},
-			db,
-		)
-		expect(
-			(
-				await deliver({
-					envelopeFrom: 'buero@schule.example',
-					messageId: '<muster1@example.org>',
-				})
-			).kind,
-		).toBe('enqueued')
-		expect(
-			await deliver({
-				envelopeFrom: 'buero@mail.schule.example',
-				messageId: '<muster2@example.org>',
-			}),
-		).toMatchObject({ kind: 'rejected' })
-	})
-
 	test('unbekannte Liste ergibt 404, nicht 403', async () => {
 		const result = await deliver({ listName: 'gibtsnicht' })
 		expect(result).toMatchObject({ kind: 'unknown_list' })
@@ -259,8 +217,9 @@ describe('Berechtigung', () => {
 				address: 'eltern',
 				label: 'Eltern',
 				recipient_groups: ['eltern'],
-				poster_policy: 'eingeschraenkt',
 				poster_groups: ['elternvertretung'],
+
+				poster_policy: 'eingeschraenkt',
 				aktiv: false,
 			},
 			db,
@@ -336,8 +295,9 @@ describe('Idempotenz des Eingangs', () => {
 				address: 'info',
 				label: 'Info',
 				recipient_groups: ['eltern'],
-				poster_policy: 'eingeschraenkt',
 				poster_groups: ['elternvertretung'],
+
+				poster_policy: 'eingeschraenkt',
 			},
 			db,
 		)

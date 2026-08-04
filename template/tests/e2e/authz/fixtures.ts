@@ -36,6 +36,9 @@ export type Stack = {
 	appOrigin: string
 	/** PAT des Dienstnutzers DIESER Wegwerf-Instanz. Sonst nichts. */
 	adminToken: string
+	orgId: string
+	/** Der Dienstzugang, mit dem die ANWENDUNG bei ZITADEL nachfragt. */
+	appServiceToken: string
 	ownProjectId: string
 	otherProjectId: string
 	clientId: string
@@ -109,19 +112,38 @@ export class Zitadel {
 		)
 	}
 
-	/** Liest die Rollen, die ZITADEL fuer diesen Grant fuehrt. */
+	/**
+	 * Liest die Rollen, die ZITADEL fuer diese Person in DIESEM Projekt fuehrt.
+	 *
+	 * Gefragt wird nach `projectIdQuery` und danach im Speicher gefiltert, und
+	 * das ist kein Umweg: `userIdQuery` liefert an derselben Schnittstelle
+	 * zuverlaessig NULL Zeilen — auch fuer Personen, die in derselben Antwort
+	 * per `projectIdQuery` sehr wohl auftauchen. Die Anwendung selbst hat sich
+	 * daran schon einmal die Rollenpruefung stillgelegt
+	 * (`src/server/auth/grants.ts`); ein Testwerkzeug, das in dieselbe Falle
+	 * geht, wuerde die Anwendung fuer kaputt erklaeren, ohne dass sie es ist.
+	 */
 	async rolesOf(user: StackUser): Promise<string[]> {
 		const result = await this.call(
 			'post',
 			'/management/v1/users/grants/_search',
 			{
-				queries: [{ userIdQuery: { userId: user.userId } }],
+				query: { limit: 1000 },
+				queries: [{ projectIdQuery: { projectId: this.stack.ownProjectId } }],
 			},
 		)
-		const grant = (result.result ?? []).find(
-			(row: { id: string }) => row.id === user.grantId,
-		)
-		return grant?.roleKeys ?? []
+		const rows: { userId?: string; roleKeys?: string[]; state?: string }[] =
+			result.result ?? []
+		const row = rows.find((entry) => entry.userId === user.userId)
+		// Genauer Vergleich und kein `endsWith('ACTIVE')`: auf "ACTIVE" endet
+		// auch `USER_GRANT_STATE_INACTIVE`.
+		if (
+			!row ||
+			(row.state ?? 'USER_GRANT_STATE_ACTIVE') !== 'USER_GRANT_STATE_ACTIVE'
+		) {
+			return []
+		}
+		return row.roleKeys ?? []
 	}
 }
 

@@ -47,6 +47,24 @@ Gespeichert werden bewusst **nur Vorname, Nachname und E-Mail-Adresse**. Keine
 Anrede, keine Telefonnummer, keine Freitext-Notizen. Wer ein Feld braucht,
 ergänzt es mit einer eigenen Migration und begründet es dort - eine Vorlage soll
 niemandem Felder aufdrängen, die er nicht erhoben haben will.
+`db/migrations/20260804170000_drop_mitglieder_anrede_telefon_notizen.sql`
+führt die Begründung im Einzelnen aus.
+
+Dazu kommt **eine** interne Spalte: `zitadel_user_id`. Sie ist die einzige
+Verbindung zur Anmeldung, die eine Heirat oder einen Anbieterwechsel übersteht
+- der sichtbare Schlüssel `id` wird für alle aus dem Namen abgeleitet
+(`slugify` in `src/lib/db/members.ts`, bei Namensgleichheit mit `-2`, `-3`).
+Die Nummer verlässt die Datenschicht nicht: Die Lesepfade in `members.ts`
+zählen ihre Spalten ausdrücklich auf, statt `SELECT *` zu benutzen, damit sie
+weder in `/verwaltung` noch über MCP herauskommt. Wer dort ein Feld ergänzt,
+muss `COLUMNS` mitziehen - sonst fällt die Nummer beim nächsten Aufruf mit
+heraus.
+
+Umgeschlüsselt wird in der **Spiegelung** (`src/server/auth/mirror.ts`), nicht
+in einer Migration: `slugify` benutzt `normalize('NFD')`, um beliebige
+Diakritika abzutragen (nicht nur Umlaute, auch é, ø, ł, ş). SQLite kann das
+nicht nachbilden, und eine zweite, leicht abweichende SQL-Regel würde dieselbe
+Person irgendwann ein zweites Mal anlegen.
 
 Auch Test-Fixtures benutzen ausschließlich erfundene Namen und
 `example.org`-Adressen.
@@ -191,7 +209,9 @@ Wer an eine Liste schreiben darf, entscheidet `poster_policy`:
 - `offen` (Vorgabe) - **jede** Absenderadresse im Internet.
 - `eingeschraenkt` - nur `poster_groups` oder ein Treffer in
   `sender_patterns` (`anna@example.org` oder `*@schule.example`; der Stern
-  ersetzt nur den lokalen Teil und trifft keine Subdomains).
+  ersetzt nur den lokalen Teil, die Domain muss exakt stimmen und trifft keine
+  Subdomains - sonst dürfte jeder, der irgendeine Subdomain kontrolliert, an
+  alle Familien schreiben).
 
 Autorisiert wird immer der **Envelope-Absender**, nie der `From:`-Header: Nur
 der Envelope läuft gegen SPF, der Header ist freier Text.

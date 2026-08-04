@@ -12,8 +12,6 @@
 --   extra_recipients  JSON-Array zusaetzlicher Einzeladressen (Personen ohne
 --                     Eintrag im Adressbuch, z.B. das Schulbuero).
 --   extra_senders     JSON-Array zusaetzlicher erlaubter Absenderadressen.
---                     Heisst ab `add_poster_policy` `sender_patterns` und kennt
---                     dann auch `*@domain`-Muster.
 -- Gruppen- und Einzeladressen werden bei der Aufloesung ueber die
 -- E-Mail-Adresse (lowercase) dedupliziert.
 --
@@ -28,8 +26,6 @@
 -- broadcast:
 --   0 -> nur poster_groups/extra_senders duerfen senden (Ankuendigung)
 --   1 -> zusaetzlich duerfen ALLE Empfaenger senden (offene Diskussion)
--- Wer ueberhaupt schreiben darf, entscheidet ab `add_poster_policy` die Spalte
--- `poster_policy`; `broadcast` wirkt seitdem nur noch bei 'eingeschraenkt'.
 CREATE TABLE mailing_lists (
   address          TEXT PRIMARY KEY,
   label            TEXT NOT NULL,

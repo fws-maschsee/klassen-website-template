@@ -5,7 +5,28 @@ import type { MitgliedInput, MitgliedRow } from './types.js'
 /** System-Group: die Elternschaft der Klasse (siehe Migration `create_groups`). */
 export const GROUP_ELTERN = 'eltern'
 
-const slugify = (firstName: string, lastName: string): string =>
+/**
+ * Die Spalten, die das Adressbuch nach aussen zeigt. Bewusst aufgezaehlt statt
+ * `SELECT *`: `zitadel_user_id` ist eine INTERNE Verknuepfung zur Anmeldung
+ * (siehe src/server/auth/mirror.ts) und hat weder in der Oberflaeche noch in
+ * einer MCP-Ausgabe etwas zu suchen. Wer sie braucht, holt sie sich dort, wo
+ * sie hingehoert — nicht hier nebenbei mit.
+ */
+const COLUMNS = 'id, first_name, last_name, email, created_at, updated_at'
+
+/** Dieselben Spalten mit Tabellen-Alias, fuer Abfragen mit JOIN. */
+const cols = (alias: string): string =>
+	COLUMNS.split(', ')
+		.map((c) => `${alias}.${c}`)
+		.join(', ')
+
+/**
+ * Leitet den Schluessel aus dem Namen ab (`vorname-nachname`). Diese Regel
+ * ist die EINZIGE Stelle, an der ids entstehen — auch die Spiegelung aus
+ * ZITADEL benutzt sie. `normalize('NFD')` traegt beliebige Diakritika ab,
+ * nicht nur die deutschen Umlaute.
+ */
+export const slugify = (firstName: string, lastName: string): string =>
 	`${firstName}-${lastName}`
 		.toLowerCase()
 		.replace(/ä/g, 'ae')
@@ -17,10 +38,44 @@ const slugify = (firstName: string, lastName: string): string =>
 		.replace(/[^a-z0-9]+/g, '-')
 		.replace(/^-+|-+$/g, '')
 
+/**
+ * Der aus dem Namen abgeleitete Schluessel — und falls der schon jemand
+ * anderem gehoert, derselbe mit `-2`, `-3`, ... dahinter. Namensgleichheit ist
+ * in einer Schulklasse moeglich (Geschwister, gleichnamige Eltern), deshalb
+ * gibt es bewusst keinen UNIQUE-Index auf den Namen.
+ *
+ * Das loest die SCHLUESSEL-Kollision, nicht die Frage, ob dahinter zweimal
+ * dieselbe Person steht — die muss ein Mensch beantworten.
+ *
+ * `keepId` bleibt frei: beim Umschluesseln einer bestehenden Zeile soll ihr
+ * eigener alter Schluessel nicht als Kollision zaehlen.
+ */
+export const uniqueMemberId = (
+	firstName: string,
+	lastName: string,
+	db: Database = openDb(),
+	keepId?: string,
+): string => {
+	const base = slugify(firstName, lastName)
+	// Voellig namenlos (z.B. leerer Profilname): dann bleibt nur etwas
+	// Kuenstliches, das wenigstens stabil ist.
+	const start = base === '' ? 'person' : base
+	const taken = db.prepare<[string], { id: string }>(
+		'SELECT id FROM mitglieder WHERE id = ?',
+	)
+	const frei = (candidate: string): boolean =>
+		candidate === keepId || !taken.get(candidate)
+	if (frei(start)) return start
+	for (let n = 2; ; n++) {
+		const candidate = `${start}-${n}`
+		if (frei(candidate)) return candidate
+	}
+}
+
 export const listMitglieder = (db: Database = openDb()): MitgliedRow[] =>
 	db
 		.prepare<[], MitgliedRow>(
-			'SELECT * FROM mitglieder ORDER BY last_name, first_name',
+			`SELECT ${COLUMNS} FROM mitglieder ORDER BY last_name, first_name`,
 		)
 		.all()
 
@@ -34,7 +89,7 @@ export const listMitgliederByGroup = (
 ): MitgliedRow[] =>
 	db
 		.prepare<[string], MitgliedRow>(
-			`SELECT m.* FROM mitglieder m
+			`SELECT ${cols('m')} FROM mitglieder m
          JOIN group_memberships gm ON gm.mitglied_id = m.id
         WHERE gm.group_key = ?
         ORDER BY m.last_name, m.first_name`,
@@ -66,7 +121,7 @@ export const listMitgliederByGroupEffective = (
          SELECT e.child_key FROM group_edges e
            JOIN subtree s ON e.parent_key = s.key
        )
-       SELECT DISTINCT m.* FROM mitglieder m
+       SELECT DISTINCT ${cols('m')} FROM mitglieder m
          JOIN group_memberships gm ON gm.mitglied_id = m.id
         WHERE gm.group_key IN (SELECT key FROM subtree)
         ORDER BY m.last_name, m.first_name`,
@@ -90,7 +145,9 @@ export const getMitglied = (
 	db: Database = openDb(),
 ): MitgliedRow | undefined =>
 	db
-		.prepare<[string], MitgliedRow>('SELECT * FROM mitglieder WHERE id = ?')
+		.prepare<[string], MitgliedRow>(
+			`SELECT ${COLUMNS} FROM mitglieder WHERE id = ?`,
+		)
 		.get(id)
 
 export const getMitgliederByIds = (
@@ -101,7 +158,7 @@ export const getMitgliederByIds = (
 	const placeholders = ids.map(() => '?').join(',')
 	return db
 		.prepare<string[], MitgliedRow>(
-			`SELECT * FROM mitglieder WHERE id IN (${placeholders})`,
+			`SELECT ${COLUMNS} FROM mitglieder WHERE id IN (${placeholders})`,
 		)
 		.all(...ids)
 }
@@ -127,8 +184,8 @@ const isSet = (value: string | null): boolean =>
 
 /**
  * Tolerante Suche ueber das Adressbuch. Freitext matcht als
- * diakritik-insensitiver Teilstring ueber Name und E-Mail; die optionalen
- * Filter grenzen zusaetzlich ein. Die Datenmenge ist klein
+ * diakritik-insensitiver Teilstring ueber Name und E-Mail;
+ * die optionalen Filter grenzen zusaetzlich ein. Die Datenmenge ist klein
  * (eine Schulklasse), daher wird in JS gefiltert — zuverlaessiger als
  * SQL-LIKE bei Diakritika.
  */

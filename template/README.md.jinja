@@ -151,30 +151,63 @@ Gruppe stehen. Welche Listen es gibt, wer sie erreicht und wer an sie schreiben
 darf, steht in der **Verwaltung** unter
 [{{ site_domain }}/verwaltung](https://{{ site_domain }}/verwaltung).
 
-### Wer darf an eine Liste schreiben?
+### Wer an einen Verteiler schreiben darf
 
-Neue Listen stehen auf **offen**. Das heißt wörtlich offen: *Jede*
-Absenderadresse im Internet kann an eine solche Liste schreiben und erreicht
-damit alle Familien darauf - auch jemand, der die Adresse nur erraten hat.
+Jede Mailingliste hat eine **Absender-Richtlinie**. Sie steht unter
+`/verwaltung` bei „Absenderrecht" und lässt sich dort ändern:
 
-Das ist mit Absicht die Vorgabe. Ein Verteiler, der nur Eingeweihte durchlässt,
-verliert genau die Post, auf die es ankommt: vom Schulbüro, von einer Lehrkraft,
-von einem Elternteil, das gerade von der Arbeitsadresse schreibt. Und wer nicht
-durchkommt, merkt es nicht - die Mail landet als Unzustellbarkeitsnachricht bei
-ihm und nie bei der Klasse.
+- **Offen** - jede Absenderadresse darf an die Liste schreiben. Das ist die
+  Vorgabe für neu angelegte Listen. Wörtlich gemeint: jede E-Mail-Adresse der
+  Welt kann eine Nachricht an alle Familien dieser Liste schicken. Bequem,
+  weil niemand vorher eingetragen werden muss - offen ist aber auch für
+  Werbung und Betrugsversuche.
+- **Eingeschränkt** - es darf nur, wer über die Absendergruppen der Liste
+  oder über ein **Absender-Muster** erlaubt ist.
 
-Wem das zu weit geht, stellt eine Liste in der Verwaltung auf
-**eingeschränkt**. Dann kommt nur durch, wer in einer Absender-Gruppe steht oder
-auf eines der hinterlegten Muster passt:
+Absender-Muster gibt es in zwei Formen, ein Muster je Zeile:
 
 ```
-anna@example.org             genau diese Adresse
-*@waldorfschule-beispiel.de  jede Adresse dieser Schuldomain
+anna@example.org               genau diese Adresse
+*@schule.example               jede Adresse dieser Domain
 ```
 
-Der Stern ersetzt nur den Teil vor dem `@` und trifft keine Subdomains. Diese
-Entscheidung sollte die Klasse einmal bewusst treffen - nicht erst, wenn eine
-wichtige Mail nicht angekommen ist.
+Der Stern steht nur ganz vorne und nur für den Teil vor dem `@`. Die Domain
+muss **genau** stimmen: `*@example.org` erlaubt `anna@example.org`, aber
+**nicht** `anna@mail.example.org`. Groß- und Kleinschreibung ist egal.
+
+Geprüft wird immer die Absenderadresse aus dem SMTP-Umschlag, nicht der
+`Von:`-Text in der Mail - nur der Umschlag lässt sich gegen SPF prüfen.
+
+Diese Entscheidung sollte die Klasse einmal bewusst treffen - nicht erst, wenn
+eine wichtige Mail nicht angekommen ist.
+
+### Was im Adressbuch steht - und was nicht
+
+Im Adressbuch der Klasse stehen **nur Vorname, Nachname und E-Mail-Adresse**.
+
+Jeder Eintrag hat außerdem einen Schlüssel, der aus dem Namen abgeleitet wird
+(`vorname-nachname`, bei Namensgleichheit mit `-2`, `-3`). Wer sich über den
+Anmeldedienst anmeldet, hat intern zusätzlich seine ZITADEL-Nutzernummer
+hinterlegt - sie ist die einzige Verbindung, die auch eine Heirat oder eine
+neue E-Mail-Adresse übersteht. Angezeigt wird sie nirgends, und über die
+Schnittstelle für Claude (MCP) kommt sie nicht heraus.
+
+Anrede, Telefonnummer und Notizen gibt es bewusst nicht. Was nicht gespeichert
+wird, kann nicht veralten, nicht falsch stehen und nicht in falsche Hände
+geraten; für den E-Mail-Versand braucht es sie nicht.
+
+**Was das für Rundmails bedeutet:** Ohne gespeichertes Geschlecht gibt es keine
+Anrede nach „Frau" und „Herr", und das soll auch so sein. Der Platzhalter
+{% raw %}`{{anrede}}`{% endraw %} in einer Rundmail liefert deshalb:
+
+```
+Hallo <Vorname>,
+```
+
+Einheitlich für alle, ohne Geschlechtsangabe. Übrig bleiben als Platzhalter
+{% raw %}`{{anrede}}`, `{{firstName}}` und `{{lastName}}` {% endraw %}(siehe
+[`emails/_beispiel.ts`](emails/_beispiel.ts)).
+
 
 ## Kontakt
 

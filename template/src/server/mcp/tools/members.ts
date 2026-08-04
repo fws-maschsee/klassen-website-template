@@ -15,6 +15,11 @@ import { syncMembersFromZitadel } from '../../auth/mirror.js'
 import type { McpAuth } from '../guard.js'
 import { registerPersonalDataTool, registerWriteTool } from '../guard.js'
 
+/**
+ * Das Adressbuch speichert bewusst nur Name und E-Mail — mehr braucht der
+ * Versand nicht. Anrede, Telefonnummer und Notizen gab es einmal und sind
+ * entfernt worden (Datenminimierung, Entscheidung des Betreibers).
+ */
 const MitgliedInputShape = {
 	id: z
 		.string()
@@ -90,12 +95,12 @@ export const registerMitgliederTools = (
 		{
 			title: 'Adressbuch durchsuchen',
 			description:
-				"Tolerante Suche statt blindem Raten von IDs. Freitext (query) matcht case- und diakritik-insensitiv als Teilstring ueber Vorname, Nachname, E-Mail, Telefon und Notizen ('Doss' findet 'Doß'). Optionale Filter: group (nur Personen in dieser Gruppe, EFFEKTIV inkl. Untergruppen), has_email. Ohne Treffer kommt eine leere Liste zurueck — dann nicht raten, sondern nachfragen.",
+				"Tolerante Suche statt blindem Raten von IDs. Freitext (query) matcht case- und diakritik-insensitiv als Teilstring ueber Vorname, Nachname und E-Mail ('Doss' findet 'Doß'). Optionale Filter: group (nur Personen in dieser Gruppe, EFFEKTIV inkl. Untergruppen), has_email. Ohne Treffer kommt eine leere Liste zurueck — dann nicht raten, sondern nachfragen.",
 			inputSchema: {
 				query: z
 					.string()
 					.optional()
-					.describe('Freitext ueber Name, E-Mail, Telefon, Notizen.'),
+					.describe('Freitext ueber Name und E-Mail.'),
 				group: z
 					.string()
 					.optional()
@@ -136,7 +141,7 @@ export const registerMitgliederTools = (
 		{
 			title: 'Adressbuch-Eintrag anlegen oder aktualisieren',
 			description:
-				'Legt eine Person an oder aktualisiert sie. Pflicht: first_name, last_name. Das Adressbuch kennt bewusst nur Name und E-Mail. Zugehoerigkeiten via groups[]. PARTIELLES UPDATE: Beim Aktualisieren werden nur die mitgeschickten Felder veraendert — ein Feld weglassen laesst es unveraendert, explizit null leert es (z.B. email: null entfernt die Adresse).',
+				'Legt eine Person an oder aktualisiert sie. Pflicht: first_name, last_name. Zugehoerigkeiten via groups[]. PARTIELLES UPDATE: Beim Aktualisieren werden nur die mitgeschickten Felder veraendert — ein Feld weglassen laesst es unveraendert, explizit null leert es (z.B. email: null entfernt die Adresse).',
 			inputSchema: MitgliedInputShape,
 		},
 		// Felder werden 1:1 durchgereicht (kein `?? null`): so bleibt die
@@ -211,7 +216,7 @@ export const registerMitgliederTools = (
 		{
 			title: 'Empfaenger mit ZITADEL abgleichen',
 			description:
-				'Holt alle Personen mit dem Rollen-Grant dieser Klasse aus ZITADEL und schreibt sie ins Adressbuch (IDs mit Praefix "zitadel-"). Wer keinen Grant mehr hat, wird entfernt. Von Hand angelegte Eintraege bleiben unberuehrt — sie sind fuer Adressen ohne Zugang gedacht (Grosseltern, Lehrkraefte, externe Kontakte). Der Abgleich laeuft ausserdem automatisch vor jeder eingehenden Listenmail; dieses Werkzeug ist fuer den Blick zwischendurch.',
+				'Holt alle Personen mit dem Rollen-Grant dieser Klasse aus ZITADEL und schreibt sie ins Adressbuch. Die id wird wie ueberall aus dem Namen abgeleitet (vorname-nachname, bei Namensgleichheit mit -2/-3); die ZITADEL-Nutzernummer steht intern und wird nicht ausgegeben. Wer keinen Grant mehr hat, wird entfernt. Von Hand angelegte Eintraege bleiben unberuehrt — sie sind fuer Adressen ohne Zugang gedacht (Grosseltern, Lehrkraefte, externe Kontakte). Der Abgleich laeuft ausserdem automatisch vor jeder eingehenden Listenmail; dieses Werkzeug ist fuer den Blick zwischendurch.',
 			inputSchema: {},
 		},
 		async () => {

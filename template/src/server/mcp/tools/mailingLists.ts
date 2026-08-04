@@ -57,7 +57,7 @@ export const registerMailingListTools = (
 		{
 			title: 'Mailinglisten auflisten',
 			description:
-				'Listet alle Mailinglisten. Jede Liste hat eine Adresse (localpart vor dem @), recipient_groups (wer bekommt sie), poster_groups (wer darf schreiben) und reply_mode. Eingehende Mail an <address>@<LIST_DOMAIN> wird an die Empfaenger weiterverteilt, wenn der Absender berechtigt ist.',
+				'Listet alle Mailinglisten. Jede Liste hat eine Adresse (localpart vor dem @), recipient_groups (wer bekommt sie), poster_policy (offen = jeder darf schreiben, eingeschraenkt = nur poster_groups/sender_patterns) und reply_mode. Eingehende Mail an <address>@<LIST_DOMAIN> wird an die Empfaenger weiterverteilt, wenn der Absender berechtigt ist.',
 			inputSchema: {},
 		},
 		() => ({
@@ -80,7 +80,7 @@ export const registerMailingListTools = (
 		{
 			title: 'Mailingliste anzeigen (inkl. aufgeloester Zahlen)',
 			description:
-				'Zeigt eine Liste plus die aktuell aufgeloeste Anzahl erlaubter Absender und Empfaenger (nach Opt-outs und Adress-Sperren). Gut, um vor dem Scharfschalten zu pruefen, wer schreiben darf und wer empfaengt.',
+				'Zeigt eine Liste plus die aktuell aufgeloeste Anzahl erlaubter Absender und Empfaenger (nach Opt-outs und Adress-Sperren). Gut, um vor dem Scharfschalten zu pruefen, wer schreiben darf und wer empfaengt. ACHTUNG bei allowed_senders: bei poster_policy "offen" darf JEDE Adresse schreiben, und Domain-Platzhalter aus sender_patterns lassen sich nicht aufzaehlen — die Zahl zaehlt nur die namentlich bekannten Adressen.',
 			inputSchema: { address: AddressSchema },
 		},
 		({ address }) => {
@@ -115,7 +115,7 @@ export const registerMailingListTools = (
 		{
 			title: 'Mailingliste anlegen oder aendern',
 			description:
-				"Legt eine Liste an oder aktualisiert sie. recipient_groups und poster_groups muessen existierende Gruppen sein (list_groups); mehrere Gruppen werden jeweils vereinigt, dedupliziert und EFFEKTIV (inkl. Untergruppen) aufgeloest. Ueber extra_recipients lassen sich einzelne Adressen als Empfaenger eintragen, auch ohne Adressbuch-Eintrag. Mindestens eine recipient_groups-Gruppe ODER eine extra_recipients-Adresse ist noetig. poster_policy entscheidet, WER schreiben darf: 'offen' (Default) = jede Absenderadresse, 'eingeschraenkt' = nur poster_groups oder sender_patterns. reply_mode: 'sender' = Antworten gehen an den Originalabsender (Ankuendigung, Default), 'list' = an die Liste (Diskussion). broadcast wirkt nur bei 'eingeschraenkt': true laesst zusaetzlich alle Empfaenger posten.",
+				"Legt eine Liste an oder aktualisiert sie. recipient_groups und poster_groups muessen existierende Gruppen sein (list_groups); mehrere Gruppen werden jeweils vereinigt, dedupliziert und EFFEKTIV (inkl. Untergruppen) aufgeloest. Ueber extra_recipients lassen sich einzelne Adressen als Empfaenger eintragen, auch ohne Adressbuch-Eintrag. Mindestens eine recipient_groups-Gruppe ODER eine extra_recipients-Adresse ist noetig. poster_policy entscheidet ueber das Absenderrecht: 'offen' (Default fuer neue Listen) laesst JEDE Adresse schreiben, 'eingeschraenkt' nur poster_groups und sender_patterns. reply_mode: 'sender' = Antworten gehen an den Originalabsender (Ankuendigung, Default), 'list' = an die Liste (Diskussion). broadcast: true macht aus der Ankuendigungs- eine offene Diskussionsliste — dann duerfen alle Empfaenger zusaetzlich posten (nur bei 'eingeschraenkt' von Bedeutung).",
 			inputSchema: {
 				address: AddressSchema,
 				label: z.string().min(1),
@@ -126,19 +126,19 @@ export const registerMailingListTools = (
 					.array(GroupKeySchema)
 					.optional()
 					.describe(
-						'Group-Keys der erlaubten Absender. Nur relevant bei poster_policy "eingeschraenkt".',
-					),
-				sender_patterns: z
-					.array(z.string().min(3))
-					.optional()
-					.describe(
-						'Erlaubte Absender als volle Adresse ("anna@example.org") oder Domain-Platzhalter ("*@schule.example", trifft nur diese Domain, keine Subdomains). Nur relevant bei poster_policy "eingeschraenkt".',
+						'Group-Keys der erlaubten Absender. Leer/weggelassen = keine Poster-Gruppe, dann zaehlen nur sender_patterns.',
 					),
 				poster_policy: z
 					.enum(['offen', 'eingeschraenkt'])
 					.optional()
 					.describe(
-						'"offen" (Default): JEDE Absenderadresse im Internet darf an diese Liste schreiben und erreicht damit alle Empfaenger. "eingeschraenkt": nur poster_groups oder sender_patterns.',
+						"'offen' (Default beim Anlegen) = jede Absenderadresse darf schreiben, auch von ausserhalb der Schule. 'eingeschraenkt' = nur poster_groups und sender_patterns.",
+					),
+				sender_patterns: z
+					.array(z.string().min(3))
+					.optional()
+					.describe(
+						"Erlaubte Absender bei poster_policy 'eingeschraenkt': volle Adresse ('anna@example.org') oder Domain-Platzhalter ('*@schule.example'). Der Stern steht nur ganz vorne; die Domain wird exakt verglichen, '*@example.org' trifft NICHT 'anna@mail.example.org'.",
 					),
 				extra_recipients: z
 					.array(z.string().email())
@@ -156,7 +156,7 @@ export const registerMailingListTools = (
 					.boolean()
 					.optional()
 					.describe(
-						'Nur bei poster_policy "eingeschraenkt": wenn true, duerfen zusaetzlich ALLE Empfaenger posten (offene Diskussionsliste unter Bekannten). Sinnvoll zusammen mit reply_mode "list".',
+						'Offene Diskussionsliste: wenn true, duerfen ALLE Empfaenger auch posten. Default false = nur die Absender-Whitelist (Ankuendigungsliste). Sinnvoll zusammen mit reply_mode "list".',
 					),
 				aktiv: z.boolean().optional(),
 			},

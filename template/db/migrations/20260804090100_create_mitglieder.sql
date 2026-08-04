@@ -1,4 +1,10 @@
 -- migrate:up
+-- ACHTUNG, HISTORISCH: Die Spalten `salutation`, `phone` und `notes` sind mit
+-- 20260804170000_drop_mitglieder_anrede_telefon_notizen wieder entfallen. Der
+-- aktuelle Stand der Tabelle steht dort. Diese Datei bleibt unveraendert
+-- ausser diesem Hinweis — Migrationen sind forward-only und werden nicht
+-- nachtraeglich umgeschrieben.
+--
 -- `mitglieder` = das Adressbuch der Klasse: Eltern, Lehrkraefte, sonstige
 -- Ansprechpartner. Der Tabellenname ist bewusst aus der Referenz-
 -- implementierung (cdu-nordstemmen/vorstand) uebernommen, damit Schema,
@@ -11,15 +17,6 @@
 -- Pod. Keine Seed-Dateien, keine Fixtures, keine Migrationsskripte mit echten
 -- Daten im Git-Repo. Auch Test-Fixtures benutzen ausschliesslich erfundene
 -- Namen und `example.org`-Adressen.
---
--- DATENSPARSAMKEIT (ebenfalls hart): Gespeichert werden NUR Name und
--- E-Mail-Adresse — das Minimum, um einen Verteiler zu betreiben. Bewusst
--- NICHT dabei: Anrede, Telefonnummer, Freitext-Notizen. Eine Anrede aus
--- festen Werten waere eine Festlegung ueber Menschen, die eine Vorlage
--- niemandem aufdraengen sollte; Telefonnummern und Notizen sind Daten, die
--- eine Klasse erst dann erheben sollte, wenn sie einen Zweck dafuer hat. Wer
--- ein Feld braucht, ergaenzt es in seiner Klasse mit einer eigenen Migration
--- und begruendet es dort — nicht hier fuer alle.
 --
 -- Rollen und Zugehoerigkeiten stehen NICHT hier, sondern als Zeilen in
 -- `group_memberships` ("alles ist eine Group"). Damit gibt es keinen
@@ -34,7 +31,10 @@ CREATE TABLE mitglieder (
   id         TEXT PRIMARY KEY,
   first_name TEXT NOT NULL,
   last_name  TEXT NOT NULL,
+  salutation TEXT NOT NULL CHECK (salutation IN ('Herr', 'Frau', 'Divers')),
   email      TEXT,
+  phone      TEXT,
+  notes      TEXT,
   created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
   updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
 );

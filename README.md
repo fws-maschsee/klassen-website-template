@@ -99,8 +99,10 @@ statischer Build würde alle Protokolle als öffentliche HTML-Dateien ausliefern
 
 ### Was die Vorlage über Daten festlegt
 
-Das Adressbuch speichert **nur Vorname, Nachname und E-Mail-Adresse**. Keine
-Anrede, keine Telefonnummer, keine Freitext-Notizen. Eine Vorlage, die eine
+Das Adressbuch speichert **nur Vorname, Nachname und E-Mail-Adresse** - dazu
+intern die `zitadel_user_id` als stabile Verbindung zur Anmeldung, die die
+Lesepfade bewusst nicht herausgeben. Keine Anrede, keine Telefonnummer, keine
+Freitext-Notizen. Eine Vorlage, die eine
 Anrede aus drei festen Werten vorschreibt, trifft eine Festlegung über
 Menschen, die sie niemandem aufdrängen sollte; und jedes vorgegebene Feld ist
 eines, das jede neue Klasse begründen müsste. Wer ein Feld braucht, ergänzt es
@@ -111,8 +113,9 @@ darf schreiben. Das ist die bewusste Vorgabe: Ein Verteiler, der nur
 Eingeweihte durchlässt, verliert genau die Post, auf die es ankommt, und der
 Absender erfährt davon nur über eine Unzustellbarkeitsnachricht. Wer es enger
 will, stellt eine Liste in der Verwaltung auf `eingeschraenkt` und hinterlegt
-Muster (`anna@example.org` oder `*@schule.example`). Die erzeugte README
-erklärt beides, damit die Klasse die Entscheidung bewusst trifft.
+Muster (`anna@example.org` oder `*@schule.example` - die Domain muss exakt
+stimmen, Subdomains zählen nicht). Die erzeugte README erklärt beides, damit
+die Klasse die Entscheidung bewusst trifft.
 
 ## Die Fallen, die die Vorlage verhindert
 

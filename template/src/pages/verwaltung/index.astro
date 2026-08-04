@@ -7,7 +7,7 @@ import {
   listPosterGroups,
   listRecipientGroups,
   listSenderPatterns,
-  setListPosterPolicy,
+  setListPosterRules,
 } from '../../lib/db/mailingLists.js'
 import {
   deleteMitglied,
@@ -19,6 +19,7 @@ import {
   listClientUsage,
   revokeAllTokensForClientAndUser,
 } from '../../lib/db/oauth.js'
+import type { PosterPolicy } from '../../lib/db/types.js'
 import { listDomain } from '../../lib/email/config.js'
 import {
   canEdit,
@@ -97,23 +98,22 @@ if (Astro.request.method === 'POST') {
           kind: 'ok',
           text: `Gespeichert: ${row.first_name} ${row.last_name} (${row.id})`,
         }
-      } else if (action === 'list-policy') {
-        const row = setListPosterPolicy(
-          text('list_address'),
-          text('poster_policy') === 'eingeschraenkt' ? 'eingeschraenkt' : 'offen',
-          // Ein Muster pro Zeile; Kommas sind erlaubt, weil sie sich beim
-          // Kopieren aus einer Mail kaum vermeiden lassen.
-          text('sender_patterns')
-            .split(/[\n,]/)
-            .map((entry) => entry.trim())
-            .filter(Boolean),
-        )
+      } else if (action === 'poster_rules') {
+        // Muster stehen im Formular zeilenweise — das ist die Schreibweise,
+        // die man ohne Erklaerung richtig macht. Leerzeilen fliegen raus.
+        const patterns = text('sender_patterns')
+          .split(/\r?\n/)
+          .map((line) => line.trim())
+          .filter((line) => line.length > 0)
+        const policy: PosterPolicy =
+          text('poster_policy') === 'offen' ? 'offen' : 'eingeschraenkt'
+        const list = setListPosterRules(text('address'), policy, patterns)
         notice = {
           kind: 'ok',
           text:
-            row.poster_policy === 'offen'
-              ? `Liste "${row.address}": jede Absenderadresse darf jetzt schreiben.`
-              : `Liste "${row.address}": nur noch berechtigte Absender.`,
+            list.poster_policy === 'offen'
+              ? `Liste „${list.label}“: jede Absenderadresse darf jetzt schreiben.`
+              : `Liste „${list.label}“: eingeschränkt, ${listSenderPatterns(list).length} Muster gespeichert.`,
         }
       } else if (action === 'delete') {
         const id = text('id')
@@ -137,6 +137,8 @@ const clients = userId ? listClientUsage(userId) : []
 const mcpUrl = `${publicBaseUrl()}/mcp`
 const editId = new URL(Astro.request.url).searchParams.get('bearbeiten')
 const editing = editId ? mitglieder.find((m) => m.id === editId) : undefined
+const listId = new URL(Astro.request.url).searchParams.get('liste')
+const editingList = listId ? lists.find((l) => l.address === listId) : undefined
 ---
 
 <Layout title="Verwaltung">
@@ -166,14 +168,15 @@ const editing = editId ? mitglieder.find((m) => m.id === editId) : undefined
     <p class="mb-3">
       Eine Mail an eine dieser Adressen erreicht alle Personen der genannten
       Gruppen. Wer an eine Liste senden <em>darf</em>, steht in der Spalte
-      „Absender" und lässt sich unter der Tabelle ändern.
+      „Absender".
     </p>
     <div class="not-prose overflow-x-auto">
       <table class="table table-sm">
         <thead>
           <tr>
             <th>Adresse</th><th>Bezeichnung</th><th>Erreicht</th>
-            <th>Absender</th><th>Antwort an</th><th>Aktiv</th>
+            <th>Wer darf senden</th><th>Antwort an</th><th>Aktiv</th>
+            {mayEdit && <th></th>}
           </tr>
         </thead>
         <tbody>
@@ -183,82 +186,91 @@ const editing = editId ? mitglieder.find((m) => m.id === editId) : undefined
               <td>{l.label}</td>
               <td class="text-xs">{listRecipientGroups(l).join(', ') || '—'}</td>
               <td class="text-xs">
-                {l.poster_policy === 'offen'
-                  ? 'alle (offen)'
-                  : l.broadcast
-                    ? 'alle Empfänger'
-                    : [...listPosterGroups(l), ...listSenderPatterns(l)].join(', ') || '—'}
+                {l.poster_policy === 'offen' ? (
+                  <strong>alle — auch von außerhalb</strong>
+                ) : (
+                  [
+                    ...listPosterGroups(l),
+                    ...(l.broadcast ? ['alle Empfänger'] : []),
+                    ...listSenderPatterns(l),
+                  ].join(', ') || 'niemand'
+                )}
               </td>
               <td class="text-xs">{l.reply_mode === 'list' ? 'die Liste' : 'den Absender'}</td>
               <td>{l.aktiv ? 'ja' : 'nein'}</td>
+              {mayEdit && (
+                <td class="whitespace-nowrap">
+                  <a class="link link-primary text-xs" href={`/verwaltung?liste=${encodeURIComponent(l.address)}`}>Absenderrecht</a>
+                </td>
+              )}
             </tr>
           ))}
           {lists.length === 0 && (
-            <tr><td colspan="6">Noch keine Verteiler angelegt.</td></tr>
+            <tr><td colspan={mayEdit ? 7 : 6}>Noch keine Verteiler angelegt.</td></tr>
           )}
         </tbody>
       </table>
     </div>
 
-    {mayEdit && lists.length > 0 && (
+    {mayEdit && editingList && (
       <>
-        <h3 class="text-lg font-bold mt-6 mb-2">Wer darf an die Listen schreiben?</h3>
-        <p class="mb-4">
-          <strong>Offen</strong> heißt wörtlich offen: <em>jede</em> Absenderadresse
-          im Internet kann an diese Liste schreiben und erreicht damit alle
-          Familien darauf — auch jemand, der die Adresse nur erraten hat. Das ist
-          die Vorgabe, weil ein Verteiler, der nur Eingeweihte durchlässt, genau
-          die Post verliert, auf die es ankommt: vom Schulbüro, von einer
-          Lehrkraft, von einem Elternteil, das gerade von der Arbeit schreibt.
-          Wer nicht durchkommt, merkt es nicht — die Mail landet als
-          Unzustellbarkeitsnachricht bei ihm und nie bei der Klasse.
+        <h3 class="text-lg font-bold mt-6 mb-3">
+          Absenderrecht: {editingList.label} ({editingList.address}@{listDomain()})
+        </h3>
+        <form method="POST" class="not-prose grid gap-3 max-w-xl">
+          <input type="hidden" name="action" value="poster_rules" />
+          <input type="hidden" name="address" value={editingList.address} />
+
+          <label class="flex items-start gap-2">
+            <input type="radio" class="radio radio-sm mt-1" name="poster_policy" value="offen"
+              checked={editingList.poster_policy === 'offen'} />
+            <span>
+              <strong>Offen</strong> — jede Absenderadresse darf an diese Liste
+              schreiben.
+              <span class="block text-sm opacity-70">
+                Das heißt wörtlich: jede E-Mail-Adresse der Welt kann eine
+                Nachricht an alle Familien dieser Liste schicken. Bequem für
+                den Alltag, weil niemand vorher eingetragen werden muss —
+                offen ist aber auch für Werbung und Betrugsversuche.
+              </span>
+            </span>
+          </label>
+
+          <label class="flex items-start gap-2">
+            <input type="radio" class="radio radio-sm mt-1" name="poster_policy" value="eingeschraenkt"
+              checked={editingList.poster_policy !== 'offen'} />
+            <span>
+              <strong>Eingeschränkt</strong> — nur die Absendergruppen der
+              Liste und die Muster unten.
+            </span>
+          </label>
+
+          <label class="form-control">
+            <span class="label-text">Erlaubte Absender (ein Muster je Zeile)</span>
+            <textarea class="textarea textarea-bordered font-mono text-sm" name="sender_patterns" rows="4"
+              >{listSenderPatterns(editingList).join('\n')}</textarea>
+            <span class="label-text-alt mt-1 opacity-70">
+              Volle Adresse (<code>anna@example.org</code>) oder ganze Domain
+              (<code>*@schule.example</code>). Der Stern steht nur
+              ganz vorne. Die Domain muss genau stimmen:
+              <code>*@example.org</code> erlaubt <em>nicht</em>
+              <code>anna@mail.example.org</code>. Groß- und Kleinschreibung
+              ist egal. Bei „Offen" spielen die Muster keine Rolle.
+            </span>
+          </label>
+
+          <div class="flex gap-3">
+            <button type="submit" class="btn btn-primary">Speichern</button>
+            <a class="btn btn-ghost" href="/verwaltung">Abbrechen</a>
+          </div>
+        </form>
+        <p class="text-sm opacity-70 mt-2 mb-6">
+          Geprüft wird die Absenderadresse aus dem SMTP-Umschlag, nicht der
+          <code>Von:</code>-Text in der Mail — nur der Umschlag lässt sich
+          gegen SPF prüfen. Empfänger, Gruppen und die übrigen Einstellungen
+          der Liste laufen weiterhin über MCP
+          (<code>upsert_mailing_list</code>).
         </p>
-        <p class="mb-4">
-          <strong>Eingeschränkt</strong> lässt nur durch, wer in einer
-          Absender-Gruppe steht oder auf eines der Muster passt. Ein Muster ist
-          entweder eine ganze Adresse (<code>anna@example.org</code>) oder eine
-          Domain (<code>*@schule.example</code>) — der Stern ersetzt nur den
-          Teil vor dem @ und trifft keine Subdomains. Geprüft wird der
-          Absender, den der einliefernde Mailserver nennt, nicht der Name im
-          Mailprogramm.
-        </p>
-        <div class="not-prose grid gap-4">
-          {lists.map((l) => (
-            <form method="POST" class="border rounded p-3 grid gap-2">
-              <input type="hidden" name="action" value="list-policy" />
-              <input type="hidden" name="list_address" value={l.address} />
-              <div class="font-mono text-xs">{l.address}@{listDomain()}</div>
-              <label class="form-control">
-                <span class="label-text">Wer darf schreiben?</span>
-                <select class="select select-bordered select-sm" name="poster_policy">
-                  <option value="offen" selected={l.poster_policy === 'offen'}>
-                    offen - jede Adresse
-                  </option>
-                  <option
-                    value="eingeschraenkt"
-                    selected={l.poster_policy === 'eingeschraenkt'}
-                  >
-                    eingeschränkt - nur Gruppen und Muster
-                  </option>
-                </select>
-              </label>
-              <label class="form-control">
-                <span class="label-text">
-                  Erlaubte Absender (ein Muster pro Zeile)
-                </span>
-                <textarea
-                  class="textarea textarea-bordered textarea-sm font-mono"
-                  name="sender_patterns"
-                  rows="3"
-                  placeholder="anna@example.org&#10;*@schule.example"
-                >{listSenderPatterns(l).join('\n')}</textarea>
-              </label>
-              <button type="submit" class="btn btn-sm btn-primary justify-self-start">
-                Speichern
-              </button>
-            </form>
-          ))}
-        </div>
       </>
     )}
 
@@ -427,6 +439,11 @@ const editing = editId ? mitglieder.find((m) => m.id === editId) : undefined
             <span class="label-text">E-Mail</span>
             <input class="input input-bordered" type="email" name="email" value={editing?.email ?? ''} />
           </label>
+          <p class="text-sm opacity-70">
+            Mehr als Name und E-Mail wird bewusst nicht gespeichert — keine
+            Anrede, keine Telefonnummer, keine Notizen. Für den Versand
+            reicht das, und was nicht da ist, kann auch nicht abhandenkommen.
+          </p>
           <fieldset class="border rounded p-3">
             <legend class="label-text px-1">Gruppen</legend>
             {groups.map((g) => (

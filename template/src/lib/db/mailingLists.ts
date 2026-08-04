@@ -34,45 +34,6 @@ const dedupeEmails = (emails: string[]): string[] => [
 	...new Set(emails.map(normalizeEmail).filter((v) => v.length > 0)),
 ]
 
-/**
- * Normalisiert ein Absender-Muster: trim + lowercase. Leere Eintraege fallen
- * weg, damit ein versehentliches Komma nicht zu einem Muster wird, das nichts
- * oder — schlimmer — alles trifft.
- */
-const dedupePatterns = (patterns: string[]): string[] => [
-	...new Set(patterns.map((p) => p.trim().toLowerCase()).filter(Boolean)),
-]
-
-/**
- * Trifft `email` das Muster `pattern`?
- *
- * Zwei Formen:
- *   `anna@example.org`   genau diese Adresse
- *   `*@schule.example`   jede Adresse dieser Domain
- *
- * Der Platzhalter steht NUR ganz vorne und ersetzt NUR den lokalen Teil. Ein
- * Muster `*@domain.tld` trifft deshalb `anna@domain.tld`, aber NICHT
- * `anna@sub.domain.tld` — sonst waere die Freigabe einer Schuldomain zugleich
- * die Freigabe jeder Subdomain, die irgendwer darunter anlegen kann.
- *
- * Verglichen wird case-insensitiv. Aufgerufen wird das mit dem ENVELOPE-
- * Absender, nicht mit dem `From:`-Header (siehe `src/lib/lists/incoming.ts`).
- */
-export const matchesSenderPattern = (
-	email: string,
-	pattern: string,
-): boolean => {
-	const address = normalizeEmail(email)
-	const pat = pattern.trim().toLowerCase()
-	if (!pat || !address.includes('@')) return false
-	if (pat.startsWith('*@')) {
-		const domain = pat.slice(2)
-		if (!domain) return false
-		return address.slice(address.lastIndexOf('@') + 1) === domain
-	}
-	return address === pat
-}
-
 /** Group-Keys der Empfaenger einer Liste. */
 export const listRecipientGroups = (list: MailingListRow): string[] =>
 	parseStringArray(list.recipient_groups)
@@ -81,9 +42,75 @@ export const listRecipientGroups = (list: MailingListRow): string[] =>
 export const listPosterGroups = (list: MailingListRow): string[] =>
 	parseStringArray(list.poster_groups)
 
-/** Erlaubte Absender-Muster einer Liste (Adressen und `*@domain`-Muster). */
+/**
+ * Absenderrichtlinie der Liste. Unbekannte Werte gelten als
+ * 'eingeschraenkt' — im Zweifel die engere Auslegung, nicht die weitere.
+ */
+export const listPosterPolicy = (list: MailingListRow): PosterPolicy =>
+	list.poster_policy === 'offen' ? 'offen' : 'eingeschraenkt'
+
+/** Erlaubte Absender-Muster der Liste (lowercased). */
 export const listSenderPatterns = (list: MailingListRow): string[] =>
-	dedupePatterns(parseStringArray(list.sender_patterns))
+	parseEmailArray(list.sender_patterns)
+
+/** `*@domain` (Domain-Platzhalter) statt voller Adresse? */
+const isDomainPattern = (pattern: string): boolean => pattern.startsWith('*@')
+
+/**
+ * Trifft `email` auf `pattern`? Vergleich case-insensitiv.
+ *
+ *   anna@example.org    trifft genau diese Adresse
+ *   *@example.org       trifft jede Adresse dieser Domain
+ *
+ * Der Stern steht nur ganz vorne und nur fuer den lokalen Teil. Die Domain
+ * wird EXAKT verglichen: `*@example.org` trifft NICHT
+ * `anna@mail.example.org`. Keine Subdomain-Magie — wer eine Subdomain
+ * freigeben will, traegt sie eigens ein. Das ueberrascht sonst genau dann,
+ * wenn es darauf ankommt: eine fremde Subdomain, die jemand kontrolliert,
+ * duerfte sonst an die Elternliste schreiben.
+ */
+export const matchesSenderPattern = (
+	email: string,
+	pattern: string,
+): boolean => {
+	const address = normalizeEmail(email)
+	const needle = normalizeEmail(pattern)
+	if (!isDomainPattern(needle)) return address === needle
+	const domain = needle.slice(2)
+	if (domain === '') return false
+	const at = address.lastIndexOf('@')
+	return at !== -1 && address.slice(at + 1) === domain
+}
+
+const DOMAIN_RE =
+	/^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/
+const LOCAL_RE = /^[^@\s*]+$/
+
+/**
+ * Prueft und normalisiert EIN Absender-Muster. Wirft mit einer erklaerenden
+ * Meldung, damit ein Tippfehler beim Speichern auffaellt statt still eine
+ * Adresse auszusperren (oder, schlimmer, eine falsche hereinzulassen).
+ */
+export const normalizeSenderPattern = (raw: string): string => {
+	const pattern = normalizeEmail(raw)
+	const hint =
+		'Erlaubt sind eine volle Adresse (anna@example.org) oder ein Domain-Platzhalter (*@example.org).'
+	if (isDomainPattern(pattern)) {
+		if (!DOMAIN_RE.test(pattern.slice(2))) {
+			throw new Error(`"${raw}" ist kein gueltiger Domain-Platzhalter. ${hint}`)
+		}
+		return pattern
+	}
+	const at = pattern.lastIndexOf('@')
+	if (
+		at < 1 ||
+		!LOCAL_RE.test(pattern.slice(0, at)) ||
+		!DOMAIN_RE.test(pattern.slice(at + 1))
+	) {
+		throw new Error(`"${raw}" ist kein gueltiges Absender-Muster. ${hint}`)
+	}
+	return pattern
+}
 
 /**
  * Ein aufgeloester Listen-Empfaenger: entweder eine Person aus dem Adressbuch
@@ -134,6 +161,11 @@ export const upsertMailingList = (
 	const recipientGroups = [...new Set(input.recipient_groups ?? [])]
 	const posterGroups = [...new Set(input.poster_groups ?? [])]
 	const extraRecipients = dedupeEmails(input.extra_recipients ?? [])
+	// Muster werden VOR dem Schreiben geprueft: ein Tippfehler soll beim
+	// Speichern auffallen, nicht erst, wenn eine Mail unerwartet abprallt.
+	const senderPatterns = [
+		...new Set((input.sender_patterns ?? []).map(normalizeSenderPattern)),
+	]
 	if (recipientGroups.length === 0 && extraRecipients.length === 0) {
 		throw new Error(
 			'Eine Liste braucht mindestens eine recipient_group oder eine extra_recipients-Adresse.',
@@ -147,8 +179,8 @@ export const upsertMailingList = (
 		label: string
 		recipient_groups: string
 		poster_groups: string
-		sender_patterns: string
 		poster_policy: string
+		sender_patterns: string
 		extra_recipients: string
 		reply_mode: string
 		subject_prefix: string | null
@@ -156,20 +188,20 @@ export const upsertMailingList = (
 		aktiv: 0 | 1
 	}>(
 		`INSERT INTO mailing_lists (
-       address, label, recipient_groups, poster_groups, sender_patterns,
-       poster_policy, extra_recipients, reply_mode, subject_prefix, broadcast,
-       aktiv
+       address, label, recipient_groups, poster_groups, poster_policy,
+       sender_patterns, extra_recipients, reply_mode, subject_prefix,
+       broadcast, aktiv
      ) VALUES (
-       @address, @label, @recipient_groups, @poster_groups, @sender_patterns,
-       @poster_policy, @extra_recipients, @reply_mode, @subject_prefix,
+       @address, @label, @recipient_groups, @poster_groups, @poster_policy,
+       @sender_patterns, @extra_recipients, @reply_mode, @subject_prefix,
        @broadcast, @aktiv
      )
      ON CONFLICT(address) DO UPDATE SET
        label = excluded.label,
        recipient_groups = excluded.recipient_groups,
        poster_groups = excluded.poster_groups,
-       sender_patterns = excluded.sender_patterns,
        poster_policy = excluded.poster_policy,
+       sender_patterns = excluded.sender_patterns,
        extra_recipients = excluded.extra_recipients,
        reply_mode = excluded.reply_mode,
        subject_prefix = excluded.subject_prefix,
@@ -180,12 +212,9 @@ export const upsertMailingList = (
 		label: input.label,
 		recipient_groups: JSON.stringify(recipientGroups),
 		poster_groups: JSON.stringify(posterGroups),
-		sender_patterns: JSON.stringify(
-			dedupePatterns(input.sender_patterns ?? []),
-		),
-		// Vorgabe `offen`: Ein Verteiler, der nur Eingeweihte durchlaesst,
-		// verliert genau die Post, auf die es ankommt.
+		// Vorgabe fuer NEUE Listen ist 'offen' (Entscheidung des Betreibers).
 		poster_policy: input.poster_policy ?? 'offen',
+		sender_patterns: JSON.stringify(senderPatterns),
 		extra_recipients: JSON.stringify(extraRecipients),
 		reply_mode: input.reply_mode ?? 'sender',
 		subject_prefix: input.subject_prefix ?? null,
@@ -211,50 +240,25 @@ export const deleteMailingList = (
 		.run(normalizeEmail(address)).changes > 0
 
 /**
- * Setzt NUR die Absender-Richtlinie einer Liste — ohne Empfaenger, Antwortweg
- * oder sonst etwas anzufassen.
- *
- * Eigene Funktion und kein `upsertMailingList`-Aufruf, weil die Verwaltungs-
- * seite genau diese eine Frage stellt. Ueber den vollen Upsert zu gehen hiesse,
- * dort saemtliche uebrigen Felder mitzuschicken — und ein vergessenes Feld
- * waere dann ein stiller Datenverlust an einer Liste, die gerade laeuft.
- */
-export const setListPosterPolicy = (
-	address: string,
-	policy: PosterPolicy,
-	patterns: string[],
-	db: Database = openDb(),
-): MailingListRow => {
-	const key = normalizeEmail(address)
-	const list = getMailingList(key, db)
-	if (!list) throw new Error(`Unbekannte Liste "${address}".`)
-	db.prepare<[string, string, string]>(
-		'UPDATE mailing_lists SET poster_policy = ?, sender_patterns = ? WHERE address = ?',
-	).run(policy, JSON.stringify(dedupePatterns(patterns)), key)
-	const row = getMailingList(key, db)
-	if (!row) throw new Error(`Liste ${key} nach dem Update verschwunden`)
-	return row
-}
-
-/**
- * Die Menge der namentlich erlaubten Absender-Adressen einer Liste
+ * Die NAMENTLICH bekannten erlaubten Absender-Adressen einer Liste
  * (lowercased): E-Mail-Adressen aller Personen ALLER `poster_groups`
- * (EFFEKTIV, also inkl. Untergruppen). Ist `broadcast` gesetzt, kommen alle
- * aufgeloesten Empfaenger dazu.
+ * (EFFEKTIV, also inkl. Untergruppen) vereinigt mit den vollen Adressen aus
+ * `sender_patterns`. Ist `broadcast` gesetzt (offene Diskussionsliste),
+ * duerfen zusaetzlich ALLE aufgeloesten Empfaenger posten.
  *
- * Die `sender_patterns` stehen bewusst NICHT hier drin: ein Muster wie
- * `*@schule.example` laesst sich nicht zu einer Menge von Adressen ausrollen.
- * Es wird in `isSenderAllowed` direkt geprueft.
- *
- * ACHTUNG: Diese Funktion beantwortet nicht die Frage "darf jemand posten?" —
- * das tut `isSenderAllowed`, und bei `poster_policy = 'offen'` faellt diese
- * Menge dort gar nicht ins Gewicht.
+ * ACHTUNG, das ist bewusst NICHT die ganze Wahrheit: Domain-Platzhalter
+ * (`*@domain`) lassen sich nicht aufzaehlen, und bei
+ * `poster_policy = 'offen'` darf ohnehin jeder. Wer wissen will, ob eine
+ * konkrete Adresse senden darf, fragt `isSenderAllowed` — diese Menge ist
+ * fuer Anzeige und Abschaetzung ("wie viele sind es ungefaehr").
  */
 export const resolveAllowedSenders = (
 	list: MailingListRow,
 	db: Database = openDb(),
 ): Set<string> => {
-	const allowed = new Set<string>()
+	const allowed = new Set<string>(
+		listSenderPatterns(list).filter((p) => !isDomainPattern(p)),
+	)
 	// Auch die Absender-Gruppen werden effektiv aufgeloest — sonst duerfte die
 	// Untergruppe einer berechtigten Obergruppe ueberraschenderweise nicht
 	// posten.
@@ -284,36 +288,46 @@ export const resolveAllowedSenders = (
 /**
  * Darf `fromEmail` in diese Liste posten?
  *
- * Bei `poster_policy = 'offen'` (Vorgabe) immer — mehr als eine syntaktisch
- * brauchbare Adresse wird nicht verlangt. Das ist die bewusste Entscheidung:
- * Ein Klassenverteiler soll vom Schulbuero, von der Musiklehrerin und vom
- * Elternteil an der Arbeitsadresse erreichbar sein, ohne dass jemand vorher
- * eine Liste pflegt.
- *
- * Bei `eingeschraenkt` genuegt EINE der beiden Quellen:
- *   - eine Adresse aus den `poster_groups` (bzw. bei `broadcast` aus den
- *     Empfaengern), oder
- *   - ein Treffer in den `sender_patterns` (Adresse oder `*@domain`).
- *
- * `fromEmail` ist der ENVELOPE-Absender. Der `From:`-Header ist freier Text
- * und darf hier nie die Grundlage sein.
+ * Geprueft wird immer die ENVELOPE-Adresse (siehe src/lib/lists/incoming.ts),
+ * nicht der `From:`-Header — nur der Envelope laeuft gegen SPF.
  */
 export const isSenderAllowed = (
 	list: MailingListRow,
 	fromEmail: string,
 	db: Database = openDb(),
 ): boolean => {
-	const address = normalizeEmail(fromEmail)
-	if (!address.includes('@')) return false
-	if (list.poster_policy === 'offen') return true
-	if (
-		listSenderPatterns(list).some((pattern) =>
-			matchesSenderPattern(address, pattern),
-		)
-	) {
-		return true
+	if (listPosterPolicy(list) === 'offen') return true
+	const email = normalizeEmail(fromEmail)
+	if (email === '') return false
+	if (resolveAllowedSenders(list, db).has(email)) return true
+	return listSenderPatterns(list)
+		.filter(isDomainPattern)
+		.some((pattern) => matchesSenderPattern(email, pattern))
+}
+
+/**
+ * Setzt Richtlinie und Muster einer bestehenden Liste — das, was ein Admin in
+ * `/verwaltung` aendern kann, ohne die uebrigen Felder anfassen zu muessen.
+ * Wirft bei unbekannter Liste oder ungueltigem Muster, BEVOR etwas
+ * geschrieben wird.
+ */
+export const setListPosterRules = (
+	address: string,
+	policy: PosterPolicy,
+	patterns: string[],
+	db: Database = openDb(),
+): MailingListRow => {
+	const key = normalizeEmail(address)
+	if (!getMailingList(key, db)) {
+		throw new Error(`Unbekannte Liste "${address}".`)
 	}
-	return resolveAllowedSenders(list, db).has(address)
+	const cleaned = [...new Set(patterns.map(normalizeSenderPattern))]
+	db.prepare<[string, string, string]>(
+		'UPDATE mailing_lists SET poster_policy = ?, sender_patterns = ? WHERE address = ?',
+	).run(policy, JSON.stringify(cleaned), key)
+	const row = getMailingList(key, db)
+	if (!row) throw new Error(`setListPosterRules: Zeile ${key} verschwunden`)
+	return row
 }
 
 /**
@@ -368,7 +382,11 @@ export const resolveListRecipients = (
 		const placeholders = groups.map(() => '?').join(', ')
 		const rows = db
 			.prepare<string[], MitgliedRow>(
-				`SELECT DISTINCT m.* FROM mitglieder m
+				// Spalten aufgezaehlt statt `m.*`: `zitadel_user_id` ist intern
+				// und darf nirgends nebenbei mitkommen (siehe members.ts).
+				`SELECT DISTINCT m.id, m.first_name, m.last_name, m.email,
+                m.created_at, m.updated_at
+           FROM mitglieder m
            JOIN group_memberships gm ON gm.mitglied_id = m.id
           WHERE gm.group_key IN (${placeholders})
             AND m.email IS NOT NULL AND m.email != ''

@@ -3,9 +3,10 @@
  * Lehrkraefte, Ansprechpartner). Zugehoerigkeiten stehen NICHT hier, sondern
  * als Group-Mitgliedschaften in `group_memberships` ("alles ist eine Group").
  *
- * Nur Name und E-Mail — mehr braucht ein Verteiler nicht. Anrede, Telefon und
- * Notizen sind bewusst nicht vorgesehen, siehe die Migration
- * `create_mitglieder`.
+ * DATENMINIMIERUNG: Hier steht bewusst nur, was der Versand braucht — Name
+ * und E-Mail. Anrede, Telefonnummer und freie Notizen gab es einmal und sind
+ * entfernt worden; was nicht gespeichert wird, kann auch nicht veralten oder
+ * in die falschen Haende geraten.
  */
 export type MitgliedRow = {
 	id: string
@@ -99,13 +100,11 @@ export type SendLogInsert = {
 export type ReplyMode = 'sender' | 'list'
 
 /**
- * Wer darf an eine Liste schreiben?
- *
- * `offen`           jede Absenderadresse im Internet. Vorgabe: Ein Verteiler,
- *                   den nur Eingeweihte erreichen, verliert genau die Post,
- *                   auf die es ankommt — und der Absender erfaehrt davon nur
- *                   ueber eine Unzustellbarkeitsnachricht.
- * `eingeschraenkt`  nur `poster_groups` ODER `sender_patterns`.
+ * Wer an eine Liste schreiben darf:
+ *   'offen'           jede Absenderadresse — auch von ausserhalb der Schule.
+ *                     Vorgabe fuer NEUE Listen.
+ *   'eingeschraenkt'  nur wer ueber `poster_groups` oder `sender_patterns`
+ *                     erlaubt ist (`broadcast` gilt darin weiter).
  */
 export type PosterPolicy = 'offen' | 'eingeschraenkt'
 
@@ -121,18 +120,15 @@ export type MailingListRow = {
 	recipient_groups: string
 	/** JSON-Array von Group-Keys der erlaubten Absender (roh aus der DB). */
 	poster_groups: string
+	/** Richtlinie fuer das Absenderrecht. */
+	poster_policy: PosterPolicy
 	/**
-	 * JSON-Array erlaubter Absender-Muster (roh aus der DB). Zwei Formen:
-	 * volle Adresse (`anna@example.org`) oder Domain-Platzhalter
-	 * (`*@schule.example`). Wirkt nur bei `poster_policy = 'eingeschraenkt'`.
+	 * JSON-Array erlaubter Absender-Muster (roh aus der DB): volle Adressen
+	 * (`anna@example.org`) oder Domain-Platzhalter
+	 * (`*@schule.example`). Wirkt nur bei
+	 * `poster_policy = 'eingeschraenkt'`.
 	 */
 	sender_patterns: string
-	/**
-	 * `offen` = jede Absenderadresse darf schreiben (Vorgabe).
-	 * `eingeschraenkt` = nur `poster_groups` / `sender_patterns` (und bei
-	 * `broadcast` zusaetzlich die Empfaenger).
-	 */
-	poster_policy: PosterPolicy
 	/** JSON-Array zusaetzlicher Empfaenger-Adressen (roh aus der DB). */
 	extra_recipients: string
 	reply_mode: ReplyMode
@@ -140,7 +136,7 @@ export type MailingListRow = {
 	/**
 	 * 1 = "Broadcasting": alle Empfaenger duerfen zusaetzlich posten (offene
 	 * Diskussionsliste). 0 = nur poster_groups/sender_patterns (Ankuendigung).
-	 * Wirkt nur bei `poster_policy = 'eingeschraenkt'`.
+	 * Ohne Bedeutung bei `poster_policy = 'offen'` — dort darf ohnehin jeder.
 	 */
 	broadcast: 0 | 1
 	aktiv: 0 | 1
@@ -158,14 +154,13 @@ export type MailingListInput = {
 	recipient_groups: string[]
 	/** Group-Keys der erlaubten Absender (Vereinigung). */
 	poster_groups?: string[]
+	/** Default beim Anlegen: 'offen'. */
+	poster_policy?: PosterPolicy
 	/**
-	 * Erlaubte Absender-Muster: volle Adressen (`anna@example.org`) oder
-	 * Domain-Platzhalter (`*@schule.example`). Nur relevant bei
+	 * Erlaubte Absender: volle Adresse oder `*@domain`. Wirkt nur bei
 	 * `poster_policy = 'eingeschraenkt'`.
 	 */
 	sender_patterns?: string[]
-	/** Vorgabe: `offen`. */
-	poster_policy?: PosterPolicy
 	/** Zusaetzliche Empfaenger-Einzeladressen. */
 	extra_recipients?: string[]
 	reply_mode?: ReplyMode
