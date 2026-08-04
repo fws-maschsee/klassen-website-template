@@ -1,11 +1,15 @@
 # klassen-website-template
 
-Copier-Vorlage für die Klassen-Websites der Freien Waldorfschule
-Hannover-Maschsee. Eine neue Klasse hat damit in wenigen Minuten eine
-lauffähige, geschützte Website - mit demselben Aufbau wie
-[`klasse-christophers`](https://github.com/fws-maschsee/klasse-christophers) und
-[`klasse-wiesen`](https://github.com/fws-maschsee/klasse-wiesen), aus denen
-diese Vorlage destilliert ist.
+Copier-Vorlage für Klassen-Websites an einer Waldorfschule. Eine neue Klasse
+hat damit in wenigen Minuten eine lauffähige, geschützte Website - mit
+demselben Aufbau wie die beiden laufenden Instanzen, aus denen diese Vorlage
+destilliert ist. Jene Repositories sind privat: dort stehen die Unterlagen und
+Protokolle einer echten Elternschaft.
+
+**Dieses Repository ist öffentlich.** Es enthält deshalb keine echten
+Klassennamen, keine echte Schuldomain und keine Personendaten - überall stehen
+Platzhalter nach RFC 2606 (`schule.example`, `example.org`). Wer hier etwas
+ergänzt, hält das durch.
 
 ## Eine neue Klassenseite anlegen
 
@@ -23,7 +27,7 @@ cd klasse-neu
 npm ci                # installiert aus der mitgelieferten Lockfile
 npm run build         # muss durchlaufen, bevor irgendetwas gepusht wird
 git init && git add -A && git commit -m "Website aus Vorlage erzeugt"
-gh repo create fws-maschsee/klasse-neu --private --source=. --push
+gh repo create <organisation>/klasse-neu --private --source=. --push
 ```
 
 Danach die Dinge erledigen, die außerhalb des Repositories liegen - sie stehen
@@ -243,23 +247,28 @@ hineingeschriebene Adresse würde jede erzeugte Klasse mit erben.
 ### 11. Keine echten Personendaten, nirgends
 
 Diese Vorlage ist ein **öffentliches** Repository. In `src/content/`, in
-Beispieldaten, in Migrationen und in Test-Fixtures stehen ausschließlich
-erfundene Namen und `example.org`-Adressen. Die SealedSecrets sind Gerüste mit
-Platzhaltern; die CI prüft, dass sie es bleiben.
+Beispieldaten, in Migrationen, in Test-Fixtures und in den Vorgabewerten von
+`copier.yml` stehen ausschließlich erfundene Namen und Platzhalter-Domains nach
+RFC 2606 (`schule.example`, `example.org`) - kein echter Klassenname, keine
+echte Schuldomain, keine echte Kontaktadresse. Die SealedSecrets sind Gerüste
+mit Platzhaltern; die CI prüft, dass sie es bleiben.
+
+Aus demselben Grund bindet die Vorlage von sich aus **keinen fremden Host** in
+die erzeugte Seite ein: `plausible_script_url` ist standardmäßig leer.
 
 ## Variablen
 
 | Variable | Vorgabe | Wofür |
 | --- | --- | --- |
-| `class_display_name` | - | Anzeigename, z. B. "Klasse Wiesen". Der einzige Wert, der beim Lehrkraftwechsel geändert wird. |
+| `class_display_name` | - | Anzeigename, z. B. "Klasse Musterfrau". Der einzige Wert, der beim Lehrkraftwechsel geändert wird. |
 | `class_slug` | aus dem Anzeigenamen | Technischer Kurzname. Steckt in Repo-Name, Hostname, Auth-Gruppe, Kalenderdatei. |
-| `school_name` | Freie Waldorfschule Hannover-Maschsee | Erscheint auf der Startseite. |
+| `school_name` | Freie Waldorfschule Musterstadt | Erscheint auf der Startseite. Platzhalter - ersetzen. |
 | `first_post_date` | 2026-01-01 | Datum des Willkommens-Beitrags. Auf den heutigen Tag setzen. |
-| `github_org` | fws-maschsee | Besitzer des erzeugten Repositories. |
+| `github_org` | meine-schule | Besitzer des erzeugten Repositories. Platzhalter - ersetzen. |
 | `repo_name` | `klasse-<slug>` | Repository, Namespace, Image, Instanz-Identität, DB-Dateiname, Klassen-Label der Listen. Faktisch unveränderlich. |
-| `base_domain` | fws-maschsee-test.de | Basis-Domain; braucht `*.<domain>` im DNS. |
+| `base_domain` | schule.example | Basis-Domain; braucht `*.<domain>` im DNS. Platzhalter - ersetzen. |
 | `site_domain` | `klasse-<slug>.<base_domain>` | Vollständiger Hostname. Nach dem Livegang faktisch festgenagelt. |
-| `contact_email` | post@levinkeller.de | Technischer Kontakt in der README. |
+| `contact_email` | `technik@<base_domain>` | Technischer Kontakt in der README. |
 | `oidc_issuer` | `https://id.<base_domain>` | Aussteller des zentralen ZITADEL. |
 | `zitadel_org_id` | leer | ID der ZITADEL-Organisation. Für den Adressbuch-Abgleich. |
 | `zitadel_project_id` | leer | ID des ZITADEL-Projekts **dieser Klasse**. |
@@ -267,9 +276,9 @@ Platzhaltern; die CI prüft, dass sie es bleiben.
 | `list_base_domain` | `lists.<base_domain>` | Listen-Domain ohne Klassen-Label; braucht `*.<domain>` als MX. |
 | `worker_name` | `<repo_name>` | Name des Cloudflare-Workers dieser Klasse. |
 | `calendar_filename` | `<slug>.ics` | Dateiname des Kalenders. Danach unveränderlich. |
-| `gitops_repo` | fws-maschsee/server-config | Wo die Argo-CD-`Application` liegt. |
+| `gitops_repo` | `<github_org>/server-config` | Wo die Argo-CD-`Application` liegt. |
 | `target_arch` | amd64 | Architektur des Cluster-Knotens. Bestimmt den Runner. |
-| `plausible_script_url` | analytics.levinkeller.de | Besucherzählung. Leer = keine Statistik. |
+| `plausible_script_url` | leer | Besucherzählung. Leer (Vorgabe) = keine Statistik und kein fremder Host im `<head>`. |
 
 ### Was bewusst nicht variabel ist
 
@@ -304,7 +313,7 @@ CLAUDE.md                 Anleitung zum Ändern der Vorlage selbst
 
 Dateien mit der Endung `.jinja` werden ersetzt, alle anderen wörtlich kopiert.
 Auch Dateinamen können Variablen enthalten - `public/public/{{ calendar_filename }}.jinja`
-wird zu `public/public/wiesen.ics`.
+wird zu `public/public/musterfrau.ics`.
 
 ## CI
 

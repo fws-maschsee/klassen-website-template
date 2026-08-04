@@ -305,7 +305,7 @@ const startZitadel = async () => {
 		'-e',
 		'ZITADEL_TLS_ENABLED=false',
 		'-e',
-		'ZITADEL_FIRSTINSTANCE_ORG_NAME=fws-maschsee-e2e',
+		'ZITADEL_FIRSTINSTANCE_ORG_NAME=klassenseite-e2e',
 		// Der Instanz-Administrator. ZITADEL legt ohne diese Angaben von sich
 		// aus `zitadel-admin@zitadel.<domain>` mit dem Herstellerpasswort
 		// `Password1!` an. Verlassen wollen wir uns darauf nicht, deshalb steht

@@ -4,7 +4,7 @@ class_display_name: Klasse Musterfrau
 class_slug: musterfrau
 school_name: Freie Waldorfschule Musterstadt
 first_post_date: "2026-01-15"
-github_org: fws-maschsee
+github_org: beispiel-schule
 repo_name: klasse-musterfrau
 base_domain: example.org
 site_domain: klasse-musterfrau.example.org
@@ -16,6 +16,6 @@ mail_from: noreply@example.org
 list_base_domain: lists.example.org
 worker_name: klasse-musterfrau
 calendar_filename: musterfrau.ics
-gitops_repo: fws-maschsee/server-config
+gitops_repo: beispiel-schule/server-config
 target_arch: amd64
 plausible_script_url: https://analytics.example.org/js/script.js

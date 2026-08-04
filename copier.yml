@@ -55,7 +55,7 @@ class_slug:
 school_name:
   type: str
   help: Name der Schule, ausgeschrieben. Erscheint auf der Startseite.
-  default: Freie Waldorfschule Hannover-Maschsee
+  default: Freie Waldorfschule Musterstadt
 
 first_post_date:
   type: str
@@ -72,8 +72,10 @@ first_post_date:
 
 github_org:
   type: str
-  help: GitHub-Organisation, der das erzeugte Repository gehört.
-  default: fws-maschsee
+  help: >-
+    GitHub-Organisation, der das erzeugte Repository gehört. Sie ist zugleich
+    der Vorgabewert für gitops_repo.
+  default: meine-schule
 
 repo_name:
   type: str
@@ -93,7 +95,9 @@ base_domain:
   help: >-
     Basis-Domain der Schule. Auf sie muss ein Wildcard-DNS-Eintrag
     *.<base_domain> zeigen, sonst bekommt die Klassenseite kein Zertifikat.
-  default: fws-maschsee-test.de
+    Die Vorgabe ist ein Platzhalter (RFC 2606) und MUSS ersetzt werden - diese
+    Vorlage ist oeffentlich und traegt deshalb keine echte Schuldomain.
+  default: schule.example
   validator: >-
     {% if '.' not in base_domain or ' ' in base_domain or '://' in base_domain %}base_domain muss ein reiner DNS-Name wie beispiel.de sein{% endif %}
 
@@ -114,8 +118,8 @@ contact_email:
   help: >-
     E-Mail-Adresse für technische Rückfragen. Steht in der README und auf der
     Seite, die Eltern sehen, die angemeldet, aber noch nicht freigeschaltet
-    sind.
-  default: post@levinkeller.de
+    sind. Die Vorgabe ist ein Platzhalter und MUSS ersetzt werden.
+  default: technik@{{ base_domain }}
   validator: >-
     {% if '@' not in contact_email %}contact_email muss eine E-Mail-Adresse sein{% endif %}
 
@@ -213,7 +217,7 @@ gitops_repo:
     Die Kubernetes-Manifeste selbst bleiben hier, unter
     deploy/overlays/production/ - dorthin schreibt der Deploy-Workflow den
     gepinnten Image-Tag.
-  default: fws-maschsee/server-config
+  default: "{{ github_org }}/server-config"
 
 target_arch:
   type: str
@@ -228,6 +232,9 @@ target_arch:
 plausible_script_url:
   type: str
   help: >-
-    URL des Plausible-Skripts für die Besucherzählung. Leer lassen, um keine
-    Statistik einzubinden.
-  default: https://analytics.levinkeller.de/js/script.js
+    URL des Plausible-Skripts für die Besucherzählung. Leer lassen (Vorgabe),
+    um keine Statistik einzubinden - dann laedt die Seite von keinem fremden
+    Host. Wer eine Zaehlung will, traegt hier die URL der EIGENEN
+    Plausible-Instanz ein; ein fremder Host ist eine Abhaengigkeit, die
+    irgendwann jemand abschaltet.
+  default: ""

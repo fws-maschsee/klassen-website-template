@@ -107,18 +107,21 @@ würde sonst eine laufende Klasse auf Platzhalter zurücksetzen.
 ## Referenzen
 
 Die Vorlage ist aus zwei laufenden Instanzen destilliert. Bei Zweifeln dort
-nachsehen, wie es wirklich läuft:
+nachsehen, wie es wirklich läuft — **beide Repositories sind privat und werden
+hier bewusst nicht beim Namen genannt**: dieses Repository ist öffentlich, und
+der Name einer Klasse ist eine Angabe über echte Familien.
 
-- [`fws-maschsee/klasse-wiesen`](https://github.com/fws-maschsee/klasse-wiesen)
-  - der vollständigere Stand und die Hauptquelle dieser Vorlage: Anmeldung,
-    Datenbank, MCP-Server, Mailinglisten, Produktions-Overlay
-- [`fws-maschsee/klasse-christophers`](https://github.com/fws-maschsee/klasse-christophers)
-  - die zweite laufende Instanz; die Unterschiede zu `klasse-wiesen` sind
-    genau die Werte, aus denen hier Platzhalter geworden sind
+- die **erste Instanz** ist die Hauptquelle dieser Vorlage: Anmeldung,
+  Datenbank, MCP-Server, Mailinglisten, Produktions-Overlay
+- die **zweite Instanz** unterscheidet sich von der ersten genau in den
+  Werten, aus denen hier Platzhalter geworden sind
+- das **GitOps-Repository** der Schule, in das die Argo-CD-`Application`
+  kommt, während `deploy/` im App-Repo bleibt
 - [`levino/agentops-community-stack`](https://github.com/levino/agentops-community-stack)
   - das Copier-Muster selbst (README §6 und §8)
-- [`fws-maschsee/server-config`](https://github.com/fws-maschsee/server-config)
-  - das GitOps-Repository, in das `deploy/` kopiert wird
+
+Diese Trennung ist keine Förmlichkeit: Wer hier einen Repository-Namen,
+eine Klassenbezeichnung oder die Schuldomain einträgt, veröffentlicht sie.
 
 Die elf Fallen, die die Vorlage abfängt, stehen mit Begründung in der
 [README](README.md). Wer eine davon "aufräumt", baut einen Ausfall nach, den es

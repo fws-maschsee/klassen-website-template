@@ -3,7 +3,7 @@
 -- MCP-Client (z.B. Claude) registriert sich selbst, schickt den Nutzer zur
 -- Consent-Seite dieser App, und bekommt danach Access-/Refresh-Token. Die
 -- Nutzer-Identitaet stammt dabei aus der bestehenden Web-Anmeldung
--- (aktuell PocketBase, siehe src/server/auth/) — dieser Teil hier verwaltet
+-- (OIDC gegen ZITADEL, siehe src/server/auth/) — dieser Teil hier verwaltet
 -- nur die MCP-Tokens.
 
 -- Registrierte Clients (via DCR oder manuell)
