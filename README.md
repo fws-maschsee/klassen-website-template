@@ -75,8 +75,8 @@ statischer Build würde alle Protokolle als öffentliche HTML-Dateien ausliefern
 
 ## Die Fallen, die die Vorlage verhindert
 
-Alle vier sind beim Aufbau der beiden Referenz-Instanzen wirklich passiert. Eine
-Vorlage, die sie nicht verhindert, wäre wertlos.
+Alle sieben sind beim Aufbau der beiden Referenz-Instanzen wirklich passiert.
+Eine Vorlage, die sie nicht verhindert, wäre wertlos.
 
 ### 1. Shipyard-Versionen sind gepinnt
 
@@ -203,6 +203,7 @@ copier.yml                Fragen, Vorgaben, Validierung
 template/                 wird in die neue Klassenseite geschrieben
 tests/answers-ci.yml      Antworten der CI-Instanz (nur Beispielwerte)
 .github/workflows/ci.yml  erzeugen, bauen, testen, Image + Smoke-Test
+CLAUDE.md                 Anleitung zum Ändern der Vorlage selbst
 ```
 
 Dateien mit der Endung `.jinja` werden ersetzt, alle anderen wörtlich kopiert.

@@ -6,18 +6,15 @@ werden **nicht von hier aus** angewandt.
 ## Wie es zusammenhängt
 
 ```
-dieses Repo                    {{ gitops_repo }}                Cluster
------------                    ----------------                -------
-push auf main
-  → Deploy-Workflow
-      baut Image (nativ)
-      startet es und prüft es
-      pusht nach ghcr.io
-      nennt den Tag
-                               apps/{{ repo_name }}/
-                                 kustomization.yaml
-                                   newTag: <Tag>  ←── von Hand eintragen
-                                                              Argo CD rollt aus
+1. dieses Repo, push auf main
+     → Deploy-Workflow: Image bauen (nativ), starten, prüfen,
+       nach ghcr.io pushen, Tag in der Zusammenfassung nennen
+
+2. {{ gitops_repo }}
+     → apps/{{ repo_name }}/kustomization.yaml: newTag von Hand eintragen
+
+3. Cluster
+     → Argo CD sieht die Änderung und rollt aus
 ```
 
 ## Einmalig einrichten
