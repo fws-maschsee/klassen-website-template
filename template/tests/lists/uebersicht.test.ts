@@ -222,9 +222,17 @@ describe('Keine fest verdrahteten Adressen mehr', () => {
 	}
 
 	test('in Seiten und Inhalten steht keine Verteiler-Adresse als Text', () => {
-		// Adressen der Form <irgendwas>@<irgendwas>.lists.<domain> bzw. die
-		// abgeloeste Mailman-Domain.
-		const verdaechtig = /[\w.-]+@[\w.-]*lists\.[\w.-]+|lists\.klasse-[\w.-]+/i
+		// Was hier NICHT stehen darf:
+		//   1. Adressen der Form <irgendwas>@<irgendwas>.lists.<domain> — die
+		//      Verteiler dieser Klasse. Sie gehoeren auf /verteiler, wo sie aus
+		//      der Datenbank kommen und nicht veralten koennen.
+		//   2. `lists.klasse-...` — die Mailman-Domain, die bei der ersten
+		//      migrierten Klasse abgeloest wurde und keine Post mehr annahm.
+		//   3. Adressen bei googlegroups.com — eine Google-Gruppe als Verteiler
+		//      im Text ist genau der Fehler, den diese Seite abloest: sie
+		//      veraltet, und niemand merkt es, bis jemand ins Leere schreibt.
+		const verdaechtig =
+			/[\w.-]+@[\w.-]*lists\.[\w.-]+|lists\.klasse-[\w.-]+|[\w.-]+@[\w.-]*googlegroups\.com/i
 		const fundstellen = textDateien()
 			.map((datei) => ({
 				datei: path.relative(projekt, datei),
