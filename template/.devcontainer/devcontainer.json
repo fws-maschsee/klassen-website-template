@@ -1,0 +1,23 @@
+{
+	"name": "Node.js & TypeScript",
+	"image": "mcr.microsoft.com/devcontainers/typescript-node:1-22-bookworm",
+	"updateContentCommand": "npm install",
+	"customizations": {
+		"vscode": {
+			"extensions": [
+				"unifiedjs.vscode-mdx",
+				"streetsidesoftware.code-spell-checker",
+				"streetsidesoftware.code-spell-checker-german",
+				"tomoki1207.pdf",
+				"bradlc.vscode-tailwindcss",
+				"DavidAnson.vscode-markdownlint",
+				"biomejs.biome",
+				"astro-build.astro-vscode"
+			],
+			"settings": {
+				"terminal.integrated.defaultProfile.linux": "zsh",
+				"cSpell.language": "de-DE"
+			}
+		}
+	}
+}

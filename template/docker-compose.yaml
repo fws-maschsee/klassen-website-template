@@ -1,0 +1,24 @@
+# Das Produktions-Image lokal ausprobieren:
+#
+#   docker compose up --build
+#   → http://localhost:3000
+#
+# Die Seite antwortet mit 401, solange man nicht angemeldet ist. Das ist das
+# richtige Verhalten und beweist, dass der Server läuft.
+#
+# Die Einstellungen unter `user`, `read_only` und `tmpfs` bilden nach, wie der
+# Container im Cluster läuft. Wer sie weglässt, testet etwas anderes als das,
+# was später deployt wird.
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    user: "1000:1000"
+    read_only: true
+    tmpfs:
+      - /tmp
+    environment:
+      - PORT=3000
+    ports:
+      - "3000:3000"

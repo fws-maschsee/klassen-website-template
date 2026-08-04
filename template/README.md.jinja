@@ -1,0 +1,160 @@
+# {{ class_display_name }} - Quellcode
+
+**Wichtiger Hinweis: Das hier ist NICHT die Website selbst!**
+
+Dies ist der **Quellcode** der Website für die Eltern der
+**{{ class_display_name }}** an der {{ school_name }}. Die eigentliche Website
+findest Du unter:
+
+**[{{ site_domain }}](https://{{ site_domain }})**
+
+## Was ist das hier?
+
+Hier werden die **Inhalte der Website verwaltet**. Im Grunde ist das die Stelle,
+an der wir die Texte bearbeiten - als einfache Textdateien - und die dann
+automatisch schön auf [{{ site_domain }}](https://{{ site_domain }}) dargestellt
+werden.
+
+## Für wen ist die Website gedacht?
+
+Ausschließlich für die **Eltern der {{ class_display_name }}**. Deshalb muss man
+sich anmelden, um sie zu sehen.
+
+## Was ist GitHub?
+
+**GitHub** ist eine Plattform, auf der Texte und Dateien gemeinsam verwaltet
+werden. Das Praktische daran: Jede Änderung ist nachvollziehbar, nichts geht
+verloren, und man kann Änderungen vorschlagen, ohne etwas kaputtmachen zu
+können.
+
+Die Texte liegen hier als **Markdown-Dateien**. Markdown ist eine sehr einfache
+Art, Texte zu formatieren - ähnlich wie bei WhatsApp:
+
+```
+# Eine Überschrift
+
+Ein ganz normaler Absatz mit **fettem** und *kursivem* Text.
+
+- ein Aufzählungspunkt
+- noch einer
+
+[Ein Link](https://example.org)
+```
+
+Mehr muss man nicht wissen, um mitzuschreiben.
+
+## Inhalte ändern
+
+Es gibt zwei Wege. **Beide sind richtig - nimm den, der Dir leichter fällt.**
+
+### Weg 1: Ein Issue schreiben (kein Technikwissen nötig)
+
+Ein "Issue" ist einfach eine Notiz an uns. Du beschreibst, was geändert werden
+soll, und jemand setzt es um.
+
+1. Oben auf **Issues** klicken.
+2. Auf **New issue** klicken.
+3. Titel und Beschreibung eintragen - ganz normal, in eigenen Worten. Zum
+   Beispiel: *"Auf der Seite Ämter steht noch Frau Müller als
+   Elternvertreterin, das ist seit dem letzten Elternabend Herr Schmidt."*
+4. Auf **Create** klicken. Fertig.
+
+Je genauer Du beschreibst, **wo** etwas steht und **was** stattdessen dort
+stehen soll, desto schneller ist es erledigt.
+
+### Weg 2: Selbst bearbeiten
+
+1. Die Datei suchen, die Du ändern willst. Die Texte liegen in zwei Ordnern:
+   - [`src/content/docs/`](src/content/docs/) - die **Unterlagen**
+     (auf der Website unter [/docs](https://{{ site_domain }}/docs))
+   - [`src/content/blog/`](src/content/blog/) - die **Berichte**
+     (auf der Website unter [/blog](https://{{ site_domain }}/blog))
+2. Die Datei anklicken und oben rechts auf das **Stift-Symbol** klicken.
+3. Text ändern.
+4. Unten auf **Commit changes** klicken, kurz beschreiben was Du geändert hast,
+   und bestätigen.
+
+Nach ein paar Minuten steht die Änderung auf der Website.
+
+> **Keine Angst.** Du kannst hier nichts kaputtmachen. Jede Änderung ist
+> gespeichert und lässt sich zurücknehmen.
+
+### Ein paar Regeln fürs Schreiben
+
+- Jede Datei beginnt mit einem kleinen Kopfbereich zwischen zwei Zeilen aus drei
+  Bindestrichen (`---`). Dort steht der `title`. Bei **Berichten** müssen
+  zusätzlich ein `date` (Datum) und eine kurze `description` dort stehen.
+- Der Dateiname eines Berichts beginnt mit dem Datum, z. B.
+  `2026-03-14-elternabend.md`.
+- Bilder für Berichte kommen nach `src/content/blog/images/` und werden mit
+  `![Bildbeschreibung](./images/dateiname.jpeg)` eingebunden.
+- PDFs und Bilder für Unterlagen kommen nach `public/dokumente/` bzw.
+  `public/img/` und werden mit dem Pfad ab dem Schrägstrich verlinkt, z. B.
+  `[Mein PDF](/dokumente/mein-pdf.pdf)`.
+- Farbige Hinweiskästen schreibt man so (der Text in eckigen Klammern ist die
+  Überschrift des Kastens):
+
+  ```
+  :::warning[Wichtig]
+
+  Hier steht der Hinweis.
+
+  :::
+  ```
+
+  Möglich sind `note`, `tip`, `info`, `warning` und `danger`.
+
+## Die Website nutzen
+
+1. **Website besuchen**: [{{ site_domain }}](https://{{ site_domain }})
+2. **Anmelden** mit einem Google- oder GitHub-Konto. Ein eigenes Passwort gibt
+   es nicht.
+3. **Inhalte ansehen**: Unterlagen und Berichte.
+
+### Warum überhaupt anmelden?
+
+Weil hier Protokolle, Kontaktdaten und Kontoverbindungen stehen. Die sind für
+die Klassengemeinschaft und für sonst niemanden.
+
+### Die Anmeldung klappt nicht
+
+Dann ist das Konto wahrscheinlich noch nicht für die Klasse freigeschaltet. Eine
+kurze Mail an [{{ contact_email }}](mailto:{{ contact_email }}) genügt.
+
+## Termine im eigenen Kalender
+
+Der Klassenkalender lässt sich abonnieren. Dann erscheinen alle Termine
+automatisch im Handy oder auf dem Rechner, und neue Termine kommen von selbst
+dazu:
+
+**[Klassenkalender abonnieren](webcal://{{ site_domain }}/public/{{ calendar_filename }})**
+
+Einmal antippen genügt - die Kalender-App fragt dann nach.
+{% if mailing_list %}
+
+## Kommunikation
+
+**Mailverteiler**: [{{ mailing_list }}](mailto:{{ mailing_list }})
+
+Über diese Adresse erreichen Mitteilungen alle Eltern der Klasse.
+{% endif %}
+
+## Kontakt
+
+- **Technische Fragen**: [{{ contact_email }}](mailto:{{ contact_email }})
+- **Inhaltsänderungen**: Einfach hier ein Issue erstellen (siehe oben)
+
+## Für Entwickler:innen
+
+Die technische Dokumentation steht in [`CLAUDE.md`](CLAUDE.md). Kurzfassung:
+
+```bash
+npm ci          # Abhängigkeiten installieren (nicht npm install)
+npm run dev     # Entwicklungsserver auf http://localhost:4321
+npm run build   # Produktions-Build
+npm test        # End-to-End-Tests (Playwright)
+```
+
+Diese Website wurde aus der Vorlage
+[fws-maschsee/klassen-website-template](https://github.com/fws-maschsee/klassen-website-template)
+erzeugt. Verbesserungen an der Vorlage holt man sich mit `uvx copier update`.

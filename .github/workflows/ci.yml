@@ -1,0 +1,251 @@
+# Prüft bei jedem Push die ganze Kette: Instanz erzeugen, bauen, testen, Image
+# bauen und mit den Einschränkungen des Clusters starten. Eine Vorlage, deren
+# Ausgabe nicht baut, ist schlimmer als keine - deshalb ist das hier die
+# eigentliche Prüfinstanz und nicht ein Anhängsel.
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  INSTANCE: /tmp/instanz
+
+jobs:
+  # Schnelles Feedback: kaputtes Jinja, unersetzte Platzhalter, ungültiges YAML.
+  generate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+      - uses: astral-sh/setup-uv@v5
+      - uses: azure/setup-kubectl@v4
+
+      - name: Instanz erzeugen
+        run: |
+          uvx --from 'copier>=9.4' copier copy --defaults \
+            --data-file tests/answers-ci.yml --vcs-ref HEAD . "$INSTANCE"
+          find "$INSTANCE" -type f -not -path '*/.git/*' | sort
+
+      # Unersetzte Platzhalter finden. Auf `{{` allein lässt sich nicht prüfen:
+      # In den Workflows steht legitim `${{ github.ref }}` und
+      # `'{{.Architecture}}'`. Also gezielt nach den Variablennamen aus
+      # copier.yml suchen.
+      - name: Keine unersetzten Platzhalter
+        run: |
+          NAMES=$(grep -E '^[a-z_]+:' copier.yml | cut -d: -f1 | paste -sd'|')
+          echo "geprüfte Variablen: $NAMES"
+          if grep -RInE "\{\{[[:space:]]*($NAMES)" "$INSTANCE" \
+               --exclude-dir=.git --exclude-dir=node_modules --exclude-dir=dist ; then
+            echo "::error::unersetzte Copier-Platzhalter in der Instanz"
+            exit 1
+          fi
+          if grep -RInE '\{%[[:space:]]*(if|for|raw|endraw)' "$INSTANCE" \
+               --exclude-dir=.git --exclude-dir=node_modules --exclude-dir=dist ; then
+            echo "::error::unverarbeitete Jinja-Blöcke in der Instanz"
+            exit 1
+          fi
+          echo "keine Platzhalter übrig"
+
+      - name: YAML parst
+        run: |
+          uv run --with pyyaml -- python - "$INSTANCE" <<'PY'
+          import glob, os, sys, yaml
+          root = sys.argv[1]
+          files = sorted(
+              glob.glob(os.path.join(root, ".github/workflows/*.yml"))
+              + glob.glob(os.path.join(root, "deploy/*.yaml"))
+              + glob.glob(os.path.join(root, "*.yaml"))
+              + glob.glob(os.path.join(root, "src/content/blog/*.yml"))
+          )
+          assert files, "keine YAML-Dateien gefunden - Pfade geprüft?"
+          for f in files:
+              list(yaml.safe_load_all(open(f)))
+              print("ok", os.path.relpath(f, root))
+          PY
+
+      - name: Kustomize baut
+        run: kubectl kustomize "$INSTANCE/deploy" > /dev/null && echo "ok"
+
+      - name: .copier-answers.yml vorhanden
+        run: |
+          test -f "$INSTANCE/.copier-answers.yml" || {
+            echo "::error::ohne .copier-answers.yml gibt es keinen Update-Pfad"
+            exit 1; }
+          cat "$INSTANCE/.copier-answers.yml"
+
+  build:
+    needs: generate
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+      - uses: astral-sh/setup-uv@v5
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Instanz erzeugen
+        run: |
+          uvx --from 'copier>=9.4' copier copy --defaults \
+            --data-file tests/answers-ci.yml --vcs-ref HEAD . "$INSTANCE"
+
+      # `npm ci`, nicht `npm install`. Bricht das hier ab, passt die
+      # mitgelieferte template/package-lock.json nicht mehr zu package.json -
+      # dann muss sie neu erzeugt werden (siehe CLAUDE.md).
+      - name: npm ci
+        working-directory: /tmp/instanz
+        run: npm ci
+
+      - name: Build
+        working-directory: /tmp/instanz
+        run: npm run build
+
+      - name: Typecheck
+        working-directory: /tmp/instanz
+        run: npm run typecheck
+
+      - name: Biome
+        working-directory: /tmp/instanz
+        run: npx @biomejs/biome ci
+
+  e2e:
+    needs: generate
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v5
+      - uses: astral-sh/setup-uv@v5
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Instanz erzeugen
+        run: |
+          uvx --from 'copier>=9.4' copier copy --defaults \
+            --data-file tests/answers-ci.yml --vcs-ref HEAD . "$INSTANCE"
+
+      - name: npm ci
+        working-directory: /tmp/instanz
+        run: npm ci
+
+      - name: Playwright installieren
+        working-directory: /tmp/instanz
+        run: npx playwright install --with-deps chromium
+
+      - name: End-to-End-Tests
+        working-directory: /tmp/instanz
+        run: npm test
+
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-report
+          path: /tmp/instanz/playwright-report/
+          retention-days: 7
+
+  # Das eigentliche Sicherheitsnetz: Ein Image, das baut, muss noch lange nicht
+  # starten. Genau diese Stufe hat die --omit=dev-Fehler gefangen.
+  image:
+    needs: generate
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v5
+      - uses: astral-sh/setup-uv@v5
+
+      - name: Instanz erzeugen
+        run: |
+          uvx --from 'copier>=9.4' copier copy --defaults \
+            --data-file tests/answers-ci.yml --vcs-ref HEAD . "$INSTANCE"
+
+      - name: Image bauen
+        working-directory: /tmp/instanz
+        run: docker build -t klassenseite:verify .
+
+      - name: Smoke-Test unter Cluster-Bedingungen
+        run: |
+          # Nicht als root, schreibgeschütztes Root-Dateisystem, /tmp als
+          # tmpfs - genau so läuft der Container im Cluster.
+          docker run -d --name smoke \
+            --user 1000:1000 --read-only --tmpfs /tmp \
+            -p 3000:3000 klassenseite:verify
+          CODE=000
+          for _ in $(seq 1 30); do
+            # `|| true`, NICHT `|| echo 000`: curl gibt bei Verbindungsfehler
+            # selbst schon 000 aus, angehängt ergäbe das "000000" und die
+            # Prüfung unten bestünde gegen einen toten Server.
+            CODE=$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:3000/ || true)
+            [ "$CODE" != "000" ] && [ -n "$CODE" ] && break
+            sleep 2
+          done
+          echo "Server antwortete mit HTTP $CODE"
+          docker logs smoke
+          case "$CODE" in
+            ''|000)
+              docker rm -f smoke >/dev/null
+              echo "::error::Server hat nie geantwortet"; exit 1 ;;
+          esac
+          # Der Kalender MUSS ohne Anmeldung erreichbar sein, sonst hören die
+          # webcal-Abos der Eltern still auf zu aktualisieren.
+          ICS=$(curl -s -o /dev/null -w '%{http_code}' \
+            http://127.0.0.1:3000/public/musterfrau.ics || true)
+          docker rm -f smoke >/dev/null
+          echo "Kalender antwortete mit HTTP $ICS"
+          [ "$ICS" = "200" ] || {
+            echo "::error::Kalender nicht ohne Login erreichbar (HTTP $ICS)"
+            exit 1; }
+          echo "Smoke-Test bestanden (Seite HTTP $CODE, Kalender HTTP $ICS)"
+
+  # `copier update` muss Änderungen der Vorlage sauber in eine unveränderte
+  # Instanz mergen - das ist der ganze Grund, warum hier Copier steht und nicht
+  # der "Use this template"-Knopf.
+  update-roundtrip:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0 # die Vorgänger-Revision wird gebraucht
+      - uses: astral-sh/setup-uv@v5
+
+      - name: Instanz aus der Vorgänger-Revision erzeugen
+        id: old
+        run: |
+          if ! OLD=$(git rev-parse --verify -q HEAD~1); then
+            echo "keine Vorgänger-Revision - übersprungen"
+            echo "skip=true" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          if ! git cat-file -e "$OLD:copier.yml" 2>/dev/null; then
+            echo "Vorgänger-Revision war noch keine Vorlage - übersprungen"
+            echo "skip=true" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          echo "update von $OLD nach HEAD"
+          uvx --from 'copier>=9.4' copier copy --defaults \
+            --data-file tests/answers-ci.yml --vcs-ref "$OLD" \
+            "$GITHUB_WORKSPACE" /tmp/alte-instanz
+          cd /tmp/alte-instanz
+          git init -q
+          git add -A
+          git -c user.email=ci@example.org -c user.name=ci \
+            -c commit.gpgsign=false commit -qm "alte Instanz"
+
+      - name: copier update muss konfliktfrei durchlaufen
+        if: steps.old.outputs.skip != 'true'
+        working-directory: /tmp/alte-instanz
+        run: |
+          uvx --from 'copier>=9.4' copier update --defaults \
+            --conflict inline --vcs-ref HEAD
+          if grep -RIn '^<<<<<<< ' . --exclude-dir=.git ; then
+            echo "::error::copier update hat Konfliktmarker hinterlassen"; exit 1
+          fi
+          if find . -name '*.rej' -not -path './.git/*' | grep -q . ; then
+            echo "::error::copier update hat .rej-Dateien erzeugt"; exit 1
+          fi
+          echo "sauberer Merge - resultierende Änderungen:"
+          git status --short

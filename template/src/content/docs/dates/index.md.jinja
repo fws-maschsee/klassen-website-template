@@ -1,0 +1,27 @@
+---
+title: Termine
+---
+
+# Termine
+
+<!--
+  Hinweis für alle, die hier etwas ändern: Die Adresse des Klassenkalenders
+  darf nicht geändert werden - unter genau dieser Adresse haben die Eltern den
+  Kalender abonniert. Wird sie geändert, hören die Abos still auf zu
+  aktualisieren. Der Name, der in der Kalender-App angezeigt wird, steht in der
+  Datei selbst (X-WR-CALNAME) und darf jederzeit angepasst werden.
+  Siehe src/site.config.ts.
+-->
+
+- [Terminkalender der Klasse](webcal://{{ site_domain }}/public/{{ calendar_filename }})
+
+Zum Abonnieren den Link antippen bzw. anklicken - die Kalender-App fragt dann,
+ob sie den Kalender hinzufügen soll. Danach erscheinen neue Termine automatisch.
+
+:::info[Kalender pflegen]
+
+Die Datei `public/public/{{ calendar_filename }}` in diesem Repository ist der
+Kalender. Termine werden dort eingetragen (am einfachsten: in einer
+Kalender-App pflegen, als .ics exportieren und die Datei hier ersetzen).
+
+:::

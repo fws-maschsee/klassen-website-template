@@ -1,0 +1,60 @@
+{
+	"name": "klassen-website",
+	"version": "0.0.0",
+	"private": true,
+	"type": "module",
+	"scripts": {
+		"dev": "astro dev --host",
+		"start": "astro dev --host",
+		"build": "astro build",
+		"preview": "astro preview",
+		"typecheck": "astro check",
+		"test": "npx playwright test"
+	},
+	"//": [
+		"Der Name dieses Pakets ist bewusst generisch und NICHT der Klassenname:",
+		"Er wandert in die package-lock.json und hätte beim Wechsel der",
+		"Klassenlehrkraft eine Lockfile-Änderung zur Folge, die niemandem nützt.",
+		"Der Klassenname steht in src/site.config.ts.",
+		"",
+		"Die @levino/*-Pakete sind auf exakte Versionen GEPINNT, nicht auf \"*\"",
+		"oder \"^\". Grund: shipyard 0.8.x setzt Astro 6 voraus. Löst npm die",
+		"Version neu auf, zieht es 0.8.x, und der Build bricht mit",
+		"'Rollup failed to resolve import \"virtual:shipyard/css\"'. Ein Update",
+		"auf shipyard 0.8 ist ein bewusster Schritt zusammen mit Astro 6, kein",
+		"Nebeneffekt eines npm install.",
+		"",
+		"html-escaper steht hier als PRODUKTIONS-Abhängigkeit, obwohl der Code",
+		"es nie importiert. Astro braucht html-escaper@^3 zur Laufzeit. Ohne",
+		"diesen Eintrag belegt das dev-Paket istanbul-reports die oberste Ebene",
+		"von node_modules mit html-escaper@2; Astro bekommt eine verschachtelte",
+		"Kopie, die die SSR-Chunks unter dist/ nicht erreichen. Solange dev-",
+		"Abhängigkeiten mitinstalliert sind, fällt das nicht auf - im Image mit",
+		"'npm ci --omit=dev' verschwindet die gehoistete Kopie und der Server",
+		"stirbt beim Start mit ERR_MODULE_NOT_FOUND."
+	],
+	"dependencies": {
+		"@astrojs/check": "^0.9.6",
+		"@astrojs/node": "^9.0.0",
+		"@astrojs/tailwind": "^6.0.2",
+		"@levino/pocketbase-auth": "1.1.1",
+		"@levino/shipyard-base": "0.6.1",
+		"@levino/shipyard-blog": "0.6.1",
+		"@levino/shipyard-docs": "0.6.2",
+		"@tailwindcss/typography": "^0.5.15",
+		"astro": "^5.16.0",
+		"daisyui": "^4.12.0",
+		"html-escaper": "^3.0.3",
+		"pocketbase": "^0.26.2",
+		"tailwindcss": "^3.4.0"
+	},
+	"devDependencies": {
+		"@biomejs/biome": "2.2.4",
+		"@playwright/test": "^1.57.0",
+		"@types/node": "^22.20.1",
+		"typescript": "^5.8.2"
+	},
+	"engines": {
+		"node": ">=22.0"
+	}
+}

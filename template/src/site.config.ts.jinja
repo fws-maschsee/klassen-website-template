@@ -1,0 +1,99 @@
+/**
+ * Zentrale Stelle für alle Bezeichnungen rund um die Klasse.
+ *
+ * Hintergrund: An Waldorfschulen wechselt die Klassenlehrkraft. Bei der ersten
+ * Klasse, die auf diesen Stack umgezogen ist, steckte der Name in 19 Dateien,
+ * und die Umbenennung war eine Suchen-und-Ersetzen-Aktion quer durchs
+ * Repository. Deshalb steht hier alles an einer Stelle: Alles, was Code ist
+ * (`astro.config.mjs`, `src/middleware.ts`, die Seiten unter `src/pages/`),
+ * importiert seine Bezeichnungen von hier.
+ *
+ * Achtung: Markdown-Dateien unter `src/content/` können nichts importieren.
+ * Dort steht der Klassenname weiterhin ausgeschrieben im Text und muss von
+ * Hand angepasst werden.
+ *
+ * Die Werte in dieser Datei zerfallen in zwei Gruppen:
+ *
+ *   1. Anzeigewerte - dürfen jederzeit geändert werden (CLASS_NAME,
+ *      SCHOOL_NAME).
+ *   2. Technische Bezeichner - dürfen NICHT einseitig geändert werden, weil
+ *      außerhalb dieses Repositories etwas daran hängt (SITE_DOMAIN,
+ *      AUTH_GROUP, CALENDAR_PATH). Jeder trägt unten seine Begründung.
+ */
+
+/**
+ * Anzeigename der Klasse. Erscheint im Seitentitel, in der Kopfzeile und in
+ * den Beschreibungstexten. Das ist der Wert, der beim Wechsel der
+ * Klassenlehrkraft angepasst wird - und zwar nur dieser.
+ */
+export const CLASS_NAME = '{{ class_display_name }}'
+
+/** Name der Schule. Erscheint auf der Startseite. */
+export const SCHOOL_NAME = '{{ school_name }}'
+
+/**
+ * Domain der Website.
+ *
+ * Technischer Bezeichner. Daran hängen DNS-Eintrag, TLS-Zertifikat, der
+ * Ingress im Cluster, die Lesezeichen der Eltern und die Kalender-Abos (siehe
+ * CALENDAR_PATH). Ein neuer Wert darf hier erst eingetragen werden, wenn die
+ * Domain registriert, im DNS eingerichtet und im Ingress hinterlegt ist -
+ * sonst ist die Seite nicht mehr erreichbar.
+ *
+ * Insbesondere: Wechselt die Klassenlehrkraft, bleibt diese Domain wie sie
+ * ist. Der Klassenname in der Adresszeile darf veralten; eine tote Adresse
+ * darf es nicht.
+ */
+export const SITE_DOMAIN = '{{ site_domain }}'
+
+/** Vollständige Basis-URL der Website. */
+export const SITE_URL = `https://${SITE_DOMAIN}`
+
+/** GitHub-Repository dieser Website. */
+export const REPO_URL = 'https://github.com/{{ github_org }}/{{ repo_name }}'
+
+/**
+ * Name der Benutzergruppe im Auth-Backend (PocketBase).
+ *
+ * Technischer Bezeichner, und der gefährlichste in dieser Datei. Der Wert ist
+ * KEIN Anzeigename: Er muss exakt dem Gruppennamen entsprechen, unter dem die
+ * Eltern in PocketBase eingetragen sind. Wird er hier geändert, ohne die
+ * Gruppe dort vorher umzubenennen, findet die Auth-Prüfung niemanden mehr und
+ * sämtliche Eltern sind ausgesperrt - die Seite antwortet dann jedem mit 401.
+ *
+ * Wer ihn ändern will, muss beides zusammen tun: zuerst die Gruppe in
+ * PocketBase umbenennen, dann diesen Wert und `AUTH_POCKETBASE_GROUP` im
+ * `Dockerfile` anpassen.
+ */
+export const AUTH_GROUP = '{{ auth_group }}'
+
+/** URL der PocketBase-Instanz, gegen die angemeldet wird. */
+export const AUTH_POCKETBASE_URL = '{{ auth_pocketbase_url }}'
+
+/**
+ * Pfad des Klassenkalenders.
+ *
+ * Technischer Bezeichner. Die Datei liegt bewusst unter `/public/`, damit sie
+ * ohne Login abrufbar ist - sonst könnten die Kalender-Apps der Eltern sie
+ * nicht aktualisieren (siehe `publicPaths` in `src/middleware.ts`).
+ *
+ * Der Dateiname wandert bei einem Wechsel der Klassenlehrkraft NICHT mit. Die
+ * Eltern haben `webcal://<domain>/public/<dieser Name>` in ihrer Kalender-App
+ * abonniert; ändert sich die Adresse, hören die Abos still auf zu
+ * aktualisieren, und niemand merkt es, bis Termine fehlen. Geändert wird nur
+ * `X-WR-CALNAME` in der Datei selbst - das ist der Name, den die Eltern in
+ * ihrer App sehen.
+ */
+export const CALENDAR_PATH = '/public/{{ calendar_filename }}'
+
+/** `webcal://`-Adresse zum Abonnieren des Klassenkalenders. */
+export const CALENDAR_WEBCAL_URL = `webcal://${SITE_DOMAIN}${CALENDAR_PATH}`
+{% if plausible_script_url %}
+
+/** Skript der Besucherzählung (Plausible). Leerer String = keine Statistik. */
+export const ANALYTICS_SCRIPT_URL = '{{ plausible_script_url }}'
+{% else %}
+
+/** Keine Besucherzählung eingebunden. */
+export const ANALYTICS_SCRIPT_URL = ''
+{% endif %}

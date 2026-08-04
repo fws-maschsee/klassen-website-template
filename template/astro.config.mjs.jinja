@@ -1,0 +1,79 @@
+import node from '@astrojs/node'
+import tailwind from '@astrojs/tailwind'
+import shipyard from '@levino/shipyard-base'
+import {
+	remarkAdmonitions,
+	remarkDirective,
+} from '@levino/shipyard-base/remark'
+import shipyardBlog from '@levino/shipyard-blog'
+import shipyardDocs from '@levino/shipyard-docs'
+import { defineConfig } from 'astro/config'
+import { remarkAdmonitionLabels } from './plugins/remark-admonition-labels.mjs'
+// Klassenname, Domain und Repo stehen zentral in src/site.config.ts.
+// Beim Wechsel der Klassenlehrkraft nur dort CLASS_NAME ändern.
+{% if plausible_script_url %}
+import {
+	ANALYTICS_SCRIPT_URL,
+	CLASS_NAME,
+	REPO_URL,
+	SITE_DOMAIN,
+	SITE_URL,
+} from './src/site.config'
+{% else %}
+import { CLASS_NAME, REPO_URL, SITE_URL } from './src/site.config'
+{% endif %}
+
+export default defineConfig({
+	site: SITE_URL,
+	// SSR, nicht statisch: Die Inhalte sind nur für die Eltern der Klasse
+	// bestimmt, und die Auth-Middleware muss jede Anfrage sehen. Ein statischer
+	// Build würde alle Berichte und Protokolle als öffentliche HTML-Dateien
+	// ausliefern.
+	output: 'server',
+	adapter: node({
+		mode: 'standalone',
+	}),
+	markdown: {
+		// Admonitions im Docusaurus-Stil (:::note, :::tip, :::info, :::warning,
+		// :::danger). Die Reihenfolge ist bindend: remarkAdmonitionLabels muss
+		// zwischen remarkDirective und remarkAdmonitions laufen.
+		remarkPlugins: [remarkDirective, remarkAdmonitionLabels, remarkAdmonitions],
+	},
+	integrations: [
+		tailwind({
+			applyBaseStyles: false,
+		}),
+		shipyard({
+			brand: CLASS_NAME,
+			title: CLASS_NAME,
+			tagline: 'Unterlagen und Berichte',
+			navigation: {
+				unterlagen: { label: 'Unterlagen', href: '/docs' },
+				berichte: { label: 'Berichte', href: '/blog' },
+				github: { label: 'GitHub', href: REPO_URL },
+				logout: { label: 'Abmelden', href: '/logout' },
+			},
+{% if plausible_script_url %}
+			scripts: [
+				{
+					src: ANALYTICS_SCRIPT_URL,
+					defer: true,
+					// Muss der Domain entsprechen, unter der die Seite in Plausible
+					// angelegt ist - nicht am Klassennamen ausrichten.
+					'data-domain': SITE_DOMAIN,
+				},
+			],
+{% endif %}
+		}),
+		shipyardDocs({
+			editUrl: `${REPO_URL}/edit/main/src/content/docs`,
+		}),
+		shipyardBlog({
+			blogTitle: 'Berichte',
+			blogDescription: `Berichte und Protokolle der ${CLASS_NAME}`,
+			authorsMapPath: './src/content/blog/authors.yml',
+			postsPerPage: 20,
+			editUrl: `${REPO_URL}/edit/main/src/content/blog`,
+		}),
+	],
+})

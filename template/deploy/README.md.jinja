@@ -1,0 +1,52 @@
+# Deployment
+
+Diese beiden Manifeste beschreiben, wie die Website im k3s-Cluster läuft. Sie
+werden **nicht von hier aus** angewandt.
+
+## Wie es zusammenhängt
+
+```
+dieses Repo                    {{ gitops_repo }}                Cluster
+-----------                    ----------------                -------
+push auf main
+  → Deploy-Workflow
+      baut Image (nativ)
+      startet es und prüft es
+      pusht nach ghcr.io
+      nennt den Tag
+                               apps/{{ repo_name }}/
+                                 kustomization.yaml
+                                   newTag: <Tag>  ←── von Hand eintragen
+                                                              Argo CD rollt aus
+```
+
+## Einmalig einrichten
+
+1. Den Inhalt dieses Ordners nach `apps/{{ repo_name }}/` in
+   [{{ gitops_repo }}](https://github.com/{{ gitops_repo }}) kopieren
+   (`app.yaml` und `kustomization.yaml`, diese README bleibt hier).
+2. `apps/{{ repo_name }}` in `apps/kustomization.yaml` dort eintragen.
+3. DNS: `{{ site_domain }}` muss auf den Cluster zeigen. Bei einem
+   Wildcard-Eintrag `*.{{ base_domain }}` ist nichts zu tun.
+4. Die Benutzergruppe `{{ auth_group }}` in PocketBase
+   ({{ auth_pocketbase_url }}) anlegen und die Eltern eintragen. Ohne sie
+   antwortet die Seite jedem mit 401.
+5. Das GHCR-Paket `{{ github_org }}/{{ repo_name }}` auf **privat** stellen und
+   dem Cluster-Knoten Lesezugriff geben
+   (`/etc/rancher/k3s/registries.yaml`).
+
+## Bei jedem Rollout
+
+Der Deploy-Workflow schreibt den zu setzenden Tag in seine Zusammenfassung.
+Diesen Tag in `apps/{{ repo_name }}/kustomization.yaml` unter `newTag`
+eintragen und pushen. Mehr passiert nicht - Argo CD erledigt den Rest.
+
+### Warum kein automatischer Tag-Bump
+
+Das GITHUB_TOKEN eines Workflows kann nicht in ein anderes Repository
+schreiben. Ein Deploy-Key oder PAT mit Schreibrecht auf das GitOps-Repository
+wäre ein dauerhaftes Geheimnis in einem Klassen-Repository, das nebenbei von
+Eltern über die GitHub-Oberfläche bearbeitet wird. Der Handgriff ist eine
+Zeile; das Geheimnis wäre für immer. Wer die Automatisierung trotzdem will,
+nimmt Argo CD Image Updater - der läuft im Cluster und braucht kein Token in
+diesem Repository.

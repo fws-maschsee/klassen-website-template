@@ -1,0 +1,43 @@
+---
+import Layout from '@levino/shipyard-base/layouts/Page.astro'
+import { CLASS_NAME, REPO_URL, SCHOOL_NAME } from '../site.config'
+---
+
+<Layout title="Willkommen">
+  <div class="container mx-auto px-4 py-12 max-w-4xl">
+    <div class="prose max-w-none mb-12">
+      <h1>Willkommen!</h1>
+      <p class="text-lg">
+        Hier findest Du alle wichtigen Unterlagen und Berichte für die Eltern der {CLASS_NAME}
+        an der {SCHOOL_NAME}.
+      </p>
+      <p>
+        Fehlt etwas oder stimmt eine Information nicht mehr? Kein Problem!
+        Du kannst gerne ein <a href={`${REPO_URL}/issues`} target="_blank" rel="noopener">Issue auf GitHub</a> erstellen
+        oder direkt Änderungen vorschlagen.
+      </p>
+    </div>
+
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+      <div class="card bg-base-100 shadow-xl">
+        <div class="card-body">
+          <h2 class="card-title">Unterlagen</h2>
+          <p>Alle wichtigen Dokumente: Putzplan, Klassenkasse, Ämter, Termine und mehr.</p>
+          <div class="card-actions justify-end">
+            <a href="/docs" class="btn btn-primary">Zu den Unterlagen</a>
+          </div>
+        </div>
+      </div>
+
+      <div class="card bg-base-100 shadow-xl">
+        <div class="card-body">
+          <h2 class="card-title">Berichte</h2>
+          <p>Protokolle von Elternabenden und andere Neuigkeiten aus der Klasse.</p>
+          <div class="card-actions justify-end">
+            <a href="/blog" class="btn btn-primary">Zu den Berichten</a>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</Layout>

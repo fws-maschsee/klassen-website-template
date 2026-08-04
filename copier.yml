@@ -1,0 +1,169 @@
+# Copier-Konfiguration.
+#
+# Alles unter template/ wird in das erzeugte Repository geschrieben; alles
+# andere (CI-Harness, tests/, diese Datei) bleibt im Template.
+_min_copier_version: "9.4.0"
+_subdirectory: template
+_envops:
+  trim_blocks: true
+  lstrip_blocks: true
+
+# Die Lockfile wird beim Erzeugen mitgeliefert, damit `npm ci` im Dockerfile
+# sofort funktioniert. Bei `copier update` gewinnt aber die Lockfile der
+# Instanz: dort haben Dependabot und lokale `npm install`-Läufe längst neuere
+# Auflösungen eingetragen, und ein Rückschreiben der Template-Lockfile würde
+# die Instanz auf den Stand des Templates zurückwerfen.
+_skip_if_exists:
+  - package-lock.json
+
+# ---------------------------------------------------------------------------
+# Klasse
+# ---------------------------------------------------------------------------
+
+class_display_name:
+  type: str
+  help: >-
+    Anzeigename der Klasse, so wie er auf der Website steht
+    (z. B. "Klasse Wiesen"). Der einzige Wert, der beim Wechsel der
+    Klassenlehrkraft später angepasst wird.
+  validator: >-
+    {% if class_display_name | trim | length == 0 %}class_display_name darf nicht leer sein{% endif %}
+
+class_slug:
+  type: str
+  help: >-
+    Technischer Kurzname, klein und ohne Umlaute (z. B. "wiesen"). Er steckt im
+    Repository-Namen, im Hostnamen, im Namen der Benutzergruppe und im
+    Dateinamen des Kalenders. NACH dem Erzeugen ist er praktisch unveränderlich
+    - siehe die Kommentare in src/site.config.ts.
+  default: >-
+    {{ class_display_name | lower | replace('klasse ', '') | replace('ä', 'ae') | replace('ö', 'oe') | replace('ü', 'ue') | replace('ß', 'ss') | replace(' ', '-') | trim }}
+  validator: >-
+    {% if not class_slug | regex_search('^[a-z0-9][a-z0-9-]*$') %}class_slug darf nur a-z, 0-9 und - enthalten und muss mit a-z oder 0-9 beginnen{% endif %}
+
+school_name:
+  type: str
+  help: Name der Schule, ausgeschrieben. Erscheint auf der Startseite.
+  default: Freie Waldorfschule Hannover-Maschsee
+
+first_post_date:
+  type: str
+  help: >-
+    Datum des ersten Berichts im Format JJJJ-MM-TT. Trage das heutige Datum
+    ein; es wird zum Dateinamen und zum Datum des Willkommens-Beitrags.
+  default: "2026-01-01"
+  validator: >-
+    {% if not first_post_date | regex_search('^[0-9]{4}-[0-9]{2}-[0-9]{2}$') %}first_post_date muss das Format JJJJ-MM-TT haben{% endif %}
+
+# ---------------------------------------------------------------------------
+# Repository und Domain
+# ---------------------------------------------------------------------------
+
+github_org:
+  type: str
+  help: GitHub-Organisation, der das erzeugte Repository gehört.
+  default: fws-maschsee
+
+repo_name:
+  type: str
+  help: Name des erzeugten Repositories innerhalb der Organisation.
+  default: klasse-{{ class_slug }}
+
+base_domain:
+  type: str
+  help: >-
+    Basis-Domain der Schule. Auf sie muss ein Wildcard-DNS-Eintrag
+    *.<base_domain> zeigen, sonst bekommt die Klassenseite kein Zertifikat.
+  default: fws-maschsee-test.de
+  validator: >-
+    {% if '.' not in base_domain or ' ' in base_domain or '://' in base_domain %}base_domain muss ein reiner DNS-Name wie beispiel.de sein{% endif %}
+
+site_domain:
+  type: str
+  help: >-
+    Vollständiger Hostname der Website. Der Vorgabewert ist der Normalfall.
+    Abweichen nur, wenn die Klasse eine eigene, bereits registrierte Domain
+    mitbringt - dieser Wert ist nach dem Livegang faktisch festgenagelt (DNS,
+    Zertifikat, Kalender-Abos, Lesezeichen der Eltern).
+  default: klasse-{{ class_slug }}.{{ base_domain }}
+  validator: >-
+    {% if '.' not in site_domain or ' ' in site_domain or '://' in site_domain %}site_domain muss ein reiner DNS-Name sein{% endif %}
+
+contact_email:
+  type: str
+  help: E-Mail-Adresse für technische Rückfragen. Steht in der README.
+  default: post@levinkeller.de
+  validator: >-
+    {% if '@' not in contact_email %}contact_email muss eine E-Mail-Adresse sein{% endif %}
+
+mailing_list:
+  type: str
+  help: >-
+    E-Mail-Verteiler der Klasseneltern. Leer lassen, wenn es (noch) keinen
+    gibt - dann entfällt der Abschnitt in der README.
+  default: eltern-klasse-{{ class_slug }}@googlegroups.com
+
+# ---------------------------------------------------------------------------
+# Authentifizierung
+# ---------------------------------------------------------------------------
+
+auth_pocketbase_url:
+  type: str
+  help: >-
+    URL der PocketBase-Instanz, gegen die angemeldet wird. Sie verwaltet die
+    Konten und die OpenID-Anbieter (Google, GitHub).
+  default: https://api.levinkeller.de
+
+auth_group:
+  type: str
+  help: >-
+    Name der Benutzergruppe in PocketBase, die Zugriff auf diese Seite hat.
+    Der Wert ist KEIN Anzeigename, sondern der Bezeichner im Auth-Backend. Er
+    muss dort exakt so existieren, bevor die Seite live geht - sonst kommt
+    niemand hinein.
+  default: "{{ class_slug }}"
+  validator: >-
+    {% if not auth_group | regex_search('^[a-z0-9_]+$') %}auth_group darf nur a-z, 0-9 und _ enthalten{% endif %}
+
+# ---------------------------------------------------------------------------
+# Kalender
+# ---------------------------------------------------------------------------
+
+calendar_filename:
+  type: str
+  help: >-
+    Dateiname des Klassenkalenders unter public/public/. Die Eltern
+    abonnieren ihn als webcal://<site_domain>/public/<dieser Name>. Der Name
+    darf danach NIE wieder geändert werden - siehe src/site.config.ts.
+  default: "{{ class_slug }}.ics"
+  validator: >-
+    {% if not calendar_filename | regex_search('^[a-z0-9._-]+\.ics$') %}calendar_filename muss auf .ics enden und darf nur a-z, 0-9, . _ - enthalten{% endif %}
+
+# ---------------------------------------------------------------------------
+# Betrieb
+# ---------------------------------------------------------------------------
+
+gitops_repo:
+  type: str
+  help: >-
+    GitHub-Repository, in dem die Kubernetes-Manifeste der Schule liegen. Die
+    Deploy-Workflow-Zusammenfassung verweist darauf, weil dort der Image-Tag
+    festgeschrieben wird.
+  default: fws-maschsee/server-config
+
+target_arch:
+  type: str
+  help: >-
+    Architektur des Cluster-Knotens. Das Image wird auf einem nativen Runner
+    dieser Architektur gebaut, nie unter QEMU.
+  choices:
+    - amd64
+    - arm64
+  default: amd64
+
+plausible_script_url:
+  type: str
+  help: >-
+    URL des Plausible-Skripts für die Besucherzählung. Leer lassen, um keine
+    Statistik einzubinden.
+  default: https://analytics.levinkeller.de/js/script.js
