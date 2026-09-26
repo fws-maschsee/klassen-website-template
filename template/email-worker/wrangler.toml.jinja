@@ -5,6 +5,7 @@ compatibility_date = "2026-06-01"
 workers_dev = false
 preview_urls = false
 
+# Hier statt im Dashboard: jeder Build aus main überschreibt die Dashboard-Einstellungen.
 [observability]
 enabled = true
 
@@ -14,6 +15,7 @@ invocation_logs = true
 [vars]
 APP_BASE_URL = "https://{{ site_domain }}"
 
+# Ohne Klassen-Label, das kommt aus CLASS_SLUG.
 LIST_DOMAIN = "{{ list_base_domain }}"
 
 CLASS_SLUG = "{{ repo_name }}"

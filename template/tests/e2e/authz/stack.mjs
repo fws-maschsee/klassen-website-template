@@ -22,6 +22,7 @@ const statePath = resolve(workDir, 'stack.json')
 const appLogPath = resolve(workDir, 'app.log')
 const patDir = resolve(workDir, 'pat')
 
+// Dieselben Versionen wie im Betrieb: eine andere ZITADEL-Version prüft anderes Verhalten.
 const ZITADEL_IMAGE = 'ghcr.io/zitadel/zitadel:v4.13.1'
 const LOGIN_IMAGE = 'ghcr.io/zitadel/zitadel-login:v4.13.1'
 const POSTGRES_IMAGE = 'postgres:17-alpine'
@@ -47,6 +48,7 @@ const issuer = `http://localhost:${ports.zitadel}`
 const loginBaseUri = `http://localhost:${ports.login}/ui/v2/login`
 const appOrigin = `http://localhost:${ports.app}`
 
+// Hartkodiert zulässig: er verschlüsselt nur eine Wegwerf-Instanz, die jeder Lauf löscht.
 const MASTERKEY = 'MasterkeyNeedsToHave32Characters'
 
 const OWN_PROJECT = 'klasse-musterfrau'
@@ -73,6 +75,7 @@ const containerLogs = (name) => {
 	const result = spawnSync('docker', ['logs', '--tail', '200', name], {
 		encoding: 'utf8',
 	})
+	// Beide Ströme: ZITADEL und PostgreSQL loggen nach stderr.
 	return `${result.stdout ?? ''}${result.stderr ?? ''}`.trim()
 }
 
@@ -149,6 +152,7 @@ const startPostgres = () => {
 				[
 					'exec',
 					names.postgres,
+					// Über TCP: der vorläufige Init-Server des Images lauscht nur am Socket und meldet sonst zu früh bereit.
 					'pg_isready',
 					'-h',
 					'127.0.0.1',
@@ -167,6 +171,7 @@ const startZitadel = async () => {
 	docker(['rm', '-f', names.zitadel], { allowFailure: true })
 	rmSync(patDir, { recursive: true, force: true })
 	mkdirSync(patDir, { recursive: true })
+	// ZITADEL schreibt das PAT unter eigener UID; auf dem CI-Runner gehört das Verzeichnis einer anderen.
 	chmodSync(patDir, 0o777)
 	docker([
 		'run',
@@ -178,7 +183,7 @@ const startZitadel = async () => {
 		'-p',
 		`${ports.zitadel}:${ports.zitadel}`,
 		'-p',
-		`${ports.login}:${ports.login}`,
+		`${ports.login}:${ports.login}`, // Login v2 teilt sich den Netzwerk-Namensraum dieses Containers
 		'-v',
 		`${patDir}:/pat`,
 		'-e',
@@ -221,6 +226,7 @@ const startZitadel = async () => {
 		'ZITADEL_FIRSTINSTANCE_ORG_MACHINE_MACHINE_USERNAME=e2e-admin-sa',
 		'-e',
 		'ZITADEL_FIRSTINSTANCE_ORG_MACHINE_MACHINE_NAME=E2E Admin',
+		// Ohne Ablaufdatum legt ZITADEL gar kein PAT an, und der Aufbau wartet ewig auf die Datei.
 		'-e',
 		'ZITADEL_FIRSTINSTANCE_ORG_MACHINE_PAT_EXPIRATIONDATE=2999-01-01T00:00:00Z',
 		'-e',
@@ -244,6 +250,7 @@ const startZitadel = async () => {
 	})
 	const adminToken = readFileSync(resolve(patDir, 'admin.pat'), 'utf8').trim()
 
+	// /debug/ready meldet schon 200, während die Verwaltungs-API intern noch „connection refused“ liefert.
 	await waitFor('zitadel (verwaltungs-api)', async () => {
 		const response = await fetch(`${issuer}/management/v1/orgs/me`, {
 			headers: { Authorization: `Bearer ${adminToken}` },
@@ -287,7 +294,7 @@ const startLoginUi = async (adminToken) => {
 		'--name',
 		names.login,
 		'--network',
-		`container:${names.zitadel}`,
+		`container:${names.zitadel}`, // ZITADEL antwortet nur unter localhost; so ist die Adresse für Login, Browser und App dieselbe
 		'-e',
 		`ZITADEL_API_URL=${issuer}`,
 		'-e',
@@ -307,6 +314,7 @@ const startLoginUi = async (adminToken) => {
 	})
 }
 
+// Nur Kennung und Kennwort: sonst schiebt Login v2 eine versionsabhängige MFA-/Passkey-Seite in jede Anmeldung.
 const relaxLoginPolicy = (adminToken) =>
 	api(adminToken, 'PUT', '/admin/v1/policies/login', {
 		allowUsernamePassword: true,
@@ -329,8 +337,8 @@ const relaxLoginPolicy = (adminToken) =>
 const createProject = async (adminToken, name) => {
 	const project = await api(adminToken, 'POST', '/management/v1/projects', {
 		name,
-		projectRoleAssertion: true,
-		projectRoleCheck: false,
+		projectRoleAssertion: true, // nur damit stehen die Projektrollen im Token
+		projectRoleCheck: false, // sonst wiese ZITADEL selbst ab, und die Seite „nicht freigeschaltet“ bliebe ungeprüft
 		hasProjectCheck: false,
 	})
 	for (const role of ['mitglied', 'admin']) {
@@ -352,7 +360,7 @@ const createOidcClient = async (adminToken, projectId) =>
 		responseTypes: ['OIDC_RESPONSE_TYPE_CODE'],
 		grantTypes: [
 			'OIDC_GRANT_TYPE_AUTHORIZATION_CODE',
-			'OIDC_GRANT_TYPE_REFRESH_TOKEN',
+			'OIDC_GRANT_TYPE_REFRESH_TOKEN', // ohne Refresh keine Nachprüfung, also kein wirksamer Entzug
 		],
 		appType: 'OIDC_APP_TYPE_WEB',
 		authMethodType: 'OIDC_AUTH_METHOD_TYPE_BASIC',
@@ -383,7 +391,7 @@ const createAppServiceUser = async (adminToken) => {
 	)
 	await api(adminToken, 'POST', '/management/v1/orgs/me/members', {
 		userId: machine.userId,
-		roles: ['ORG_USER_MANAGER'],
+		roles: ['ORG_USER_MANAGER'], // nicht ORG_OWNER: eine zu schwache Betriebsrolle soll hier auffallen
 	})
 	return pat.token
 }
@@ -391,7 +399,7 @@ const createAppServiceUser = async (adminToken) => {
 const TEST_PASSWORD = 'E2e-Testpasswort-1!'
 
 const createUser = async (adminToken, key, firstName, lastName) => {
-	const email = `e2e-${key}@example.invalid`
+	const email = `e2e-${key}@example.invalid` // RFC 2606: garantiert nicht zustellbar
 	const user = await api(
 		adminToken,
 		'POST',
@@ -461,6 +469,7 @@ const setup = async () => {
 	])
 	users.fremd = fremd
 
+	// Eigene Nutzer je Test: die Tests ändern Rollen und hingen sonst von der Reihenfolge ab.
 	const entzug = await createUser(adminToken, 'entzug', 'Enno', 'Ehlers')
 	entzug.grantId = await grant(adminToken, entzug.userId, ownProjectId, [
 		'mitglied',
@@ -526,7 +535,7 @@ const setup = async () => {
 const appEnv = (state) => ({
 	...process.env,
 	NODE_ENV: 'production',
-	DISABLE_AUTH: '',
+	DISABLE_AUTH: '', // diese Tests prüfen die Anmeldung selbst
 	PORT: String(ports.app),
 	OIDC_ISSUER: state.issuer,
 	OIDC_CLIENT_ID: state.clientId,
@@ -616,8 +625,10 @@ const down = ({ quiet = false } = {}) => {
 		const state = JSON.parse(readFileSync(statePath, 'utf8'))
 		if (state.appPid) {
 			try {
-				process.kill(-state.appPid, 'SIGTERM')
-			} catch {}
+				process.kill(-state.appPid, 'SIGTERM') // ganze Prozessgruppe, sonst hält der Kindprozess von npm start den Port
+			} catch {
+				// schon beendet
+			}
 		}
 		rmSync(statePath, { force: true })
 	}

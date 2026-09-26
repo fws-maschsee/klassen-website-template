@@ -94,6 +94,7 @@ export const subtreeGroupKeys = (
 ): string[] =>
 	db
 		.prepare<[string], { key: string }>(
+			// UNION statt UNION ALL: terminiert auch bei einem Zyklus in Altdaten.
 			`WITH RECURSIVE subtree(key) AS (
          SELECT ?
          UNION

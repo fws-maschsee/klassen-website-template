@@ -5,6 +5,7 @@ import { computeSignature } from '../src/signature.js'
 const SECRET = 'test-secret'
 const body = new TextEncoder().encode('rohe MIME-Bytes')
 
+// Bewusst ausgeschrieben statt aus der App importiert: ändert sich das Format im Worker, muss dieser Test brechen.
 const nodeSignature = (timestamp: string, data: Uint8Array): string =>
 	createHmac('sha256', SECRET)
 		.update(`${timestamp}.`)

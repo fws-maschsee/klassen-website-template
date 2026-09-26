@@ -13,6 +13,7 @@ const prefixed = (timestamp: string, body: Uint8Array): Uint8Array => {
 	return data
 }
 
+// Timestamp mitsigniert gegen Replay; das Format muss zu verifyListSignature in der App passen.
 export const computeSignature = async (
 	secret: string,
 	timestamp: string,

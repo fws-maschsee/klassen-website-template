@@ -93,6 +93,7 @@ export const processListBatch = async (
 	const transport = options.transport ?? sesTransport()
 
 	const cap = hourlyCap()
+	// Beide Quellen zählen: Rundmails und Listen teilen sich das SES-Limit der Absenderdomain.
 	const sent = countSentInLastHour(db) + countListSentInLastHour(db)
 	if (sent >= cap) return { kind: 'cap_reached', sentInLastHour: sent }
 

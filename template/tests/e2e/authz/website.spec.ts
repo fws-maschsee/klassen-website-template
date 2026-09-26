@@ -7,6 +7,7 @@ const versucheSchreibzugriff = async (
 	page: import('@playwright/test').Page,
 	nachname: string,
 ) =>
+	// page.request trägt die Cookies derselben Sitzung ohne Neuanmeldung, und ein POST kommt auch ohne sichtbares Formular an.
 	page.request.post('/verwaltung', {
 		form: {
 			action: 'upsert',
@@ -146,6 +147,7 @@ test.describe('Weboberflaeche', () => {
 	})
 })
 
+// ZITADEL ist ereignisbasiert: der PUT ist beantwortet, bevor die lesenden Projektionen ihn kennen.
 const erwarteRollen = async (
 	zitadel: { rolesOf: (user: StackUser) => Promise<string[]> },
 	user: StackUser,

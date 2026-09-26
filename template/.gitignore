@@ -23,6 +23,7 @@ db/schema.sql
 
 .env
 
+# Der Stern deckt auch .env.example.jinja im Template ab.
 !.env.example*
 
 tests/e2e/authz/.stack/

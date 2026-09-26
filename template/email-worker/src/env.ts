@@ -11,6 +11,7 @@ export interface Env {
 
 export const INCOMING_PATH = '/api/lists/incoming'
 
+// Weit unter Cloudflares 25 MiB: die App stellt jede Mail einzeln an alle Empfänger zu.
 export const DEFAULT_MAX_MESSAGE_BYTES = 10 * 1024 * 1024
 
 export const DEFAULT_REQUEST_TIMEOUT_MS = 10_000
@@ -49,6 +50,7 @@ export const readConfig = (env: Env): Config => {
 	}
 
 	const base = new URL(env.APP_BASE_URL)
+	// Die Mail ginge sonst im Klartext zur App.
 	if (base.protocol !== 'https:') {
 		throw new Error(`APP_BASE_URL ist nicht https: ${env.APP_BASE_URL}`)
 	}

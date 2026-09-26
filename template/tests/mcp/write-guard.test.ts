@@ -9,6 +9,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mcp-guard-'))
 const dbFile = path.join(tmpDir, 'test.db')
 
+// Vor jedem Import, der die DB öffnet: openDb() merkt sich die erste Verbindung.
 process.env.DB_PATH = dbFile
 process.env.MCP_INSTANCE_NAME = 'klasse-musterfrau'
 

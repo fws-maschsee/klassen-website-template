@@ -53,6 +53,7 @@ if (Astro.request.method === 'POST') {
 		const code = createAuthCode({
 			client_id: pending.client_id,
 			user_id: userId,
+			// Ein MCP-Client hat kein Sitzungs-Cookie; ohne die Rollen im Code wüsste /mcp nicht, ob er ändern darf.
 			roles: auth.user.roles,
 			code_challenge: pending.code_challenge,
 			code_challenge_method: pending.code_challenge_method,
@@ -73,6 +74,7 @@ if (Astro.request.method === 'POST') {
 
 const scopeList = pending.scopes ?? ['mcp']
 
+// Dieselbe Prüfung wie der MCP-Server: die Seite soll nicht mehr versprechen, als das Token später kann.
 const mayEdit = canEdit(auth.user.roles)
 ---
 

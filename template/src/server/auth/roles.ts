@@ -2,6 +2,7 @@ export const ROLE_MITGLIED = 'mitglied'
 
 export const ROLE_ADMIN = 'admin'
 
+// personen und bearbeiten hängen heute beide an admin; getrennt, damit jede Aufrufstelle zeigt, warum sie prüft.
 export type Capability = 'lesen' | 'personen' | 'bearbeiten'
 
 export const may = (
@@ -10,6 +11,7 @@ export const may = (
 	requiredRole: string = ROLE_MITGLIED,
 ): boolean => {
 	const admin = roles.includes(ROLE_ADMIN)
+	// admin schließt lesen ein, auch wenn beim Grant der Haken bei mitglied fehlt.
 	if (capability === 'lesen') return admin || roles.includes(requiredRole)
 	return admin
 }

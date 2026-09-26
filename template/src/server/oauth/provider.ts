@@ -27,7 +27,7 @@ const toClientInfo = (
 	c: ReturnType<typeof getClient> extends infer R ? NonNullable<R> : never,
 ): OAuthClientInformationFull => ({
 	client_id: c.client_id,
-	client_secret: c.client_secret ?? undefined,
+	client_secret: c.client_secret ?? undefined, // Klartext: die Client-Auth des SDK vergleicht ihn direkt.
 	client_name: c.client_name,
 	redirect_uris: c.redirect_uris as [string, ...string[]],
 	grant_types: c.grant_types,
@@ -72,6 +72,7 @@ const clientsStore: OAuthRegisteredClientsStore = {
 	},
 }
 
+// Bewusst ohne token.roles: ein per Refresh erneuertes Token trüge entzogene Rollen weiter; guard.ts fragt ZITADEL.
 const accessTokenToAuthInfo = (token: AccessToken, raw: string): AuthInfo => ({
 	token: raw,
 	clientId: token.client_id,
@@ -112,7 +113,7 @@ export const mcpOAuthProvider: OAuthServerProvider = {
 	async exchangeAuthorizationCode(
 		client: OAuthClientInformationFull,
 		authorizationCode: string,
-		_codeVerifier?: string,
+		_codeVerifier?: string, // PKCE prüft bereits der Token-Handler des SDK
 		_redirectUri?: string,
 		_resource?: URL,
 	): Promise<OAuthTokens> {
@@ -159,6 +160,7 @@ export const mcpOAuthProvider: OAuthServerProvider = {
 	async verifyAccessToken(token: string): Promise<AuthInfo> {
 		const access = verifyAccessToken(token)
 		if (!access) {
+			// Nur InvalidTokenError wird zu 401 mit WWW-Authenticate; sonst 500, und der Client autorisiert sich nie neu.
 			throw new InvalidTokenError('Token unbekannt, abgelaufen oder widerrufen')
 		}
 		return accessTokenToAuthInfo(access, token)

@@ -37,6 +37,7 @@ export const listPosterGroups = (list: MailingListRow): string[] =>
 	parseStringArray(list.poster_groups)
 
 export const listPosterPolicy = (list: MailingListRow): PosterPolicy =>
+	// Unbekannte Werte gelten als eingeschränkt: im Zweifel die engere Auslegung.
 	list.poster_policy === 'offen' ? 'offen' : 'eingeschraenkt'
 
 export const listSenderPatterns = (list: MailingListRow): string[] =>
@@ -54,6 +55,7 @@ export const matchesSenderPattern = (
 	const domain = needle.slice(2)
 	if (domain === '') return false
 	const at = address.lastIndexOf('@')
+	// Domain exakt, keine Subdomains: sonst dürfte jede fremd kontrollierte Subdomain an die Elternliste schreiben.
 	return at !== -1 && address.slice(at + 1) === domain
 }
 
@@ -120,6 +122,7 @@ export const upsertMailingList = (
 	const posterGroups = [...new Set(input.poster_groups ?? [])]
 	const extraRecipients = dedupeEmails(input.extra_recipients ?? [])
 	const senderPatterns = [
+		// Vor dem Schreiben prüfen: ein Tippfehler soll beim Speichern auffallen, nicht erst als abgeprallte Mail.
 		...new Set((input.sender_patterns ?? []).map(normalizeSenderPattern)),
 	]
 	if (recipientGroups.length === 0 && extraRecipients.length === 0) {
@@ -168,6 +171,7 @@ export const upsertMailingList = (
 		label: input.label,
 		recipient_groups: JSON.stringify(recipientGroups),
 		poster_groups: JSON.stringify(posterGroups),
+		// Vorgabe 'offen' für neue Listen ist eine Entscheidung des Betreibers.
 		poster_policy: input.poster_policy ?? 'offen',
 		sender_patterns: JSON.stringify(senderPatterns),
 		extra_recipients: JSON.stringify(extraRecipients),
@@ -201,6 +205,7 @@ export const resolveAllowedSenders = (
 	const allowed = new Set<string>(
 		listSenderPatterns(list).filter((p) => !isDomainPattern(p)),
 	)
+	// Effektiv aufgelöst, sonst dürfte die Untergruppe einer berechtigten Gruppe nicht posten.
 	const groups = expandToSubtrees(listPosterGroups(list), db)
 	if (groups.length > 0) {
 		const placeholders = groups.map(() => '?').join(', ')
@@ -257,6 +262,7 @@ export const setListPosterRules = (
 	return row
 }
 
+// Sicherheitsventil für die Erprobung: gesetzt, bekommen nur diese Adressen Post; Entfernen ist der Schritt in den Echtbetrieb.
 const allowlist = (): string[] =>
 	(process.env.LIST_RECIPIENT_ALLOWLIST ?? '')
 		.split(',')
@@ -280,6 +286,7 @@ export const resolveListRecipients = (
 		const placeholders = groups.map(() => '?').join(', ')
 		const rows = db
 			.prepare<string[], MitgliedRow>(
+				// Spalten statt m.*: zitadel_user_id ist intern und darf nicht nebenbei mitkommen.
 				`SELECT DISTINCT m.id, m.first_name, m.last_name, m.email,
                 m.created_at, m.updated_at
            FROM mitglieder m
@@ -312,6 +319,7 @@ export const resolveListRecipients = (
 		}
 	}
 
+	// Adress-Sperren zuletzt: sie gelten auch für Adressen aus extra_recipients.
 	const blocked = new Set(
 		db
 			.prepare<[string], { email: string }>(

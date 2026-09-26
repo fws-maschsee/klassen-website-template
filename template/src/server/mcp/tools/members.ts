@@ -140,6 +140,7 @@ export const registerMitgliederTools = (
 		},
 		(input) => {
 			try {
+				// Kein `?? null`: weggelassen heißt unverändert, explizit null heißt leeren.
 				const row = upsertMitglied({
 					id: input.id,
 					first_name: input.first_name,

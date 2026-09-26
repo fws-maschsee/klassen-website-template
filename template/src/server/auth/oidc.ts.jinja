@@ -13,12 +13,14 @@ const ROLES_CLAIM = 'urn:zitadel:iam:org:project:roles'
 
 const SESSION_COOKIE = 'fws_session'
 
+// Ein Cookie pro Anmeldeversuch: mit einem festen Namen überschriebe ein zweiter Tab den state des ersten.
 const STATE_COOKIE_PREFIX = 'fws_auth_'
 
 const STATE_MAX_AGE_SECONDS = 15 * 60
 
 const SESSION_MAX_AGE_SECONDS = 30 * 24 * 60 * 60
 
+// Stündlicher Refresh beim IdP beendet eine widerrufene Sitzung, ohne Eltern täglich neu anmelden zu lassen.
 const ROLE_RECHECK_SECONDS = 60 * 60
 
 const DISCOVERY_TTL_MS = 60 * 60 * 1000
@@ -65,6 +67,7 @@ export const getOidcConfig = (): OidcConfig => {
 		clientId,
 		clientSecret,
 		requiredRole,
+		// SHA-256 statt roher Bytes: A256GCM verlangt exakt 32 Byte, so passt jedes beliebige Geheimnis.
 		sessionKey: new Uint8Array(
 			createHash('sha256').update(sessionSecret).digest(),
 		),
@@ -134,6 +137,7 @@ const serializeCookie = (
 		`${name}=${encodeURIComponent(value)}`,
 		'Path=/',
 		'HttpOnly',
+		// Nicht Strict: der Rücksprung von ZITADEL ist eine fremde Top-Level-Navigation, sonst liefe die Anmeldung im Kreis.
 		'SameSite=Lax',
 		`Max-Age=${options.maxAge}`,
 	]
@@ -187,6 +191,7 @@ const decryptSession = async (
 		const { payload } = await jwtDecrypt(value, key)
 		const session = payload as unknown as Session
 		if (!session?.sub) return null
+		// Rollen stehen nie im Cookie, sie kommen in resolveSession frisch aus ZITADEL.
 		session.roles = []
 		if (session.expiresAt <= Math.floor(Date.now() / 1000)) return null
 		return session
@@ -204,6 +209,7 @@ const challengeFor = (verifier: string): string =>
 
 const basicAuth = (clientId: string, clientSecret: string): string =>
 	`Basic ${Buffer.from(
+		// RFC 6749 §2.3.1: vor Base64 form-kodieren, sonst scheitern Secrets mit Sonderzeichen.
 		`${encodeURIComponent(clientId)}:${encodeURIComponent(clientSecret)}`,
 	).toString('base64')}`
 
@@ -215,6 +221,7 @@ const safeReturnTo = (value: string | null | undefined): string => {
 }
 
 const publicOrigin = (request: Request): string => {
+	// Nicht request.url: je nach Astro-Version meldet es localhost, und die redirect_uri muss zeichengenau passen.
 	const configured = readEnv('OIDC_PUBLIC_ORIGIN')
 	if (configured) return configured.replace(/\/$/, '')
 
@@ -421,6 +428,7 @@ const sessionFromClaims = (
 		roles: rolesFromClaims(claims),
 		refreshToken: refreshToken ?? previous?.refreshToken,
 		checkedAt: now,
+		// Die Obergrenze zählt ab der ersten Anmeldung, sonst wäre die Sitzung faktisch unbegrenzt.
 		expiresAt: previous?.expiresAt ?? now + SESSION_MAX_AGE_SECONDS,
 	}
 }
@@ -456,6 +464,7 @@ export const handleCallback = async (request: Request): Promise<Response> => {
 
 	const cookieName = `${STATE_COOKIE_PREFIX}${state.slice(0, 16)}`
 	const pendingCookie = cookies[cookieName]
+	// Meist abgelaufen (15 min) oder Tab aus dem Verlauf: kein Fehler, sauber neu beginnen.
 	if (!pendingCookie) {
 		return startLogin(request, '/')
 	}
@@ -543,7 +552,9 @@ export const handleLogout = async (request: Request): Promise<Response> => {
 			endSession.searchParams.set('post_logout_redirect_uri', `${origin}/`)
 			target = endSession.toString()
 		}
-	} catch {}
+	} catch {
+		// Lokales Abmelden ist der wichtigere Teil und darf nicht an der Discovery scheitern.
+	}
 
 	return new Response(null, {
 		status: 302,
@@ -554,6 +565,8 @@ export const handleLogout = async (request: Request): Promise<Response> => {
 	})
 }
 
+// ZITADEL rotiert Refresh-Tokens; ohne Zusammenfassen gewönne von vielen parallelen Anfragen (HTML plus /_astro/) nur eine.
+// Im Speicher genügt, weil der Dienst mit genau einer Replik läuft.
 const refreshInFlight = new Map<
 	string,
 	{ at: number; result: Promise<Session | null> }
@@ -662,8 +675,10 @@ export const resolveSession = async (
 			})
 		: null
 
+	// Bei jeder Anfrage frisch; fällt ZITADEL aus, wird verweigert statt durchgewunken.
 	session.roles = await rolesForUser(session.sub)
 
+	// canRead statt includes: admin darf auch ohne zusätzlichen mitglied-Grant lesen.
 	if (!canRead(session.roles, config.requiredRole)) {
 		return { state: 'unauthorized', session, setCookie }
 	}

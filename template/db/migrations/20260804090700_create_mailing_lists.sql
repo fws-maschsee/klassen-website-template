@@ -2,6 +2,7 @@
 CREATE TABLE mailing_lists (
   address          TEXT PRIMARY KEY,
   label            TEXT NOT NULL,
+  -- Group-Keys als JSON ohne FK: eine Liste soll das Löschen einer Gruppe nicht blockieren, geprüft wird in der App.
   recipient_groups TEXT NOT NULL DEFAULT '[]',
   poster_groups    TEXT NOT NULL DEFAULT '[]',
   extra_senders    TEXT NOT NULL DEFAULT '[]',

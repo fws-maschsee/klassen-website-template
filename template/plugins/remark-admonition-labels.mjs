@@ -1,5 +1,6 @@
 import { visit } from 'unist-util-visit'
 
+// remarkAdmonitions aus shipyard liest `node.label`, remark-directive legt den Titel aber als ersten Absatz ab.
 export const remarkAdmonitionLabels = () => (tree) => {
 	visit(tree, 'containerDirective', (node) => {
 		const [first] = node.children ?? []

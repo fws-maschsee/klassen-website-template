@@ -10,9 +10,11 @@ export const mailFrom = (): string => process.env.MAIL_FROM ?? DEFAULT_MAIL_FROM
 export const mailFromName = (): string =>
 	process.env.MAIL_FROM_NAME ?? CLASS_NAME
 
+// Rückfall auf die Versandadresse, bewusst kein geratener Klassenverteiler.
 export const mailReplyTo = (): string => process.env.MAIL_REPLY_TO ?? mailFrom()
 
 export const listDomain = (): string =>
+	// Klassen-Label aus der Instanz-Identität, damit Listen-Domain und Datenbank nicht auseinanderlaufen.
 	process.env.LIST_DOMAIN ?? `${instanceName()}.${DEFAULT_LIST_BASE_DOMAIN}`
 
 export const listEnvelopeFrom = (): string =>

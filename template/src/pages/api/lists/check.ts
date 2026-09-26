@@ -13,6 +13,8 @@ type CheckBody = {
 	from?: unknown
 }
 
+// Vom Worker derzeit ungenutzt, bleibt aber: beantwortet "warum kommt meine Mail nicht an?" ohne Testmail
+// und dient einem Worker, der schon beim SMTP-Handshake ablehnen will.
 export const POST: APIRoute = async ({ request }) => {
 	const rawBody = Buffer.from(await request.arrayBuffer())
 

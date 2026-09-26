@@ -25,11 +25,11 @@ jobs:
 {% endraw %}{% if target_arch == 'arm64' %}
           - platform: linux/arm64
             arch: arm64
-            runner: ubuntu-24.04-arm
+            runner: ubuntu-24.04-arm # nativ, nie QEMU
 {% else %}
           - platform: linux/amd64
             arch: amd64
-            runner: ubuntu-latest
+            runner: ubuntu-latest # nativ, nie QEMU
 {% endif %}{% raw %}
     runs-on: ${{ matrix.runner }}
     steps:
@@ -62,11 +62,13 @@ jobs:
 
       - name: Smoke test the image
         run: |
+          # Wie im Cluster: non-root, read-only rootfs; /data muss beschreibbar sein, sonst scheitert dbmate.
           docker run -d --name smoke \
             --user 1000:1000 --read-only --tmpfs /tmp --tmpfs /data \
             -p 3000:3000 "${IMAGE}:verify"
           CODE=000
           for _ in $(seq 1 30); do
+            # Nur `|| true`: curl gibt selbst 000 aus, ein `|| echo 000` ergäbe 000000.
             CODE=$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:3000/ || true)
             [ "$CODE" != "000" ] && [ -n "$CODE" ] && break
             sleep 2
@@ -76,6 +78,7 @@ jobs:
           echo "GET /public/{% endraw %}{{ calendar_filename }}{% raw %} -> HTTP $ICS"
           docker logs smoke
           docker rm -f smoke >/dev/null
+          # Kein 200 auf / erwarten: unangemeldet ist 401 die gesunde Antwort.
           case "$CODE" in
             ''|000) echo "::error::server never answered"; exit 1 ;;
             *) echo "smoke test passed (HTTP $CODE)" ;;
@@ -154,16 +157,17 @@ jobs:
             echo "veroeffentlicht das Overlay auf dem Branch \`production\`."
           } >> "$GITHUB_STEP_SUMMARY"
 
+  # Eigener Branch statt Commit auf main: der Bot schreibt nicht in den Arbeitsbranch und löst keinen neuen Lauf aus.
   deploy:
     needs: merge
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     permissions:
-      contents: write
+      contents: write # Vorgabe für Workflow-Token ist read
     steps:
       - uses: actions/checkout@v5
         with:
-          ref: ${{ github.sha }}
+          ref: ${{ github.sha }} # der gebaute Stand, nicht die inzwischen weitergelaufene Spitze von main
 
       - name: Install kustomize
         run: |
@@ -175,7 +179,7 @@ jobs:
         working-directory: deploy/overlays/production
         run: |
           kustomize edit set image ${{ env.IMAGE }}=${{ env.IMAGE }}:${{ github.sha }}
-          kustomize build . > /dev/null
+          kustomize build . > /dev/null # ein kaputtes Overlay darf nie auf production landen
           git --no-pager diff -- kustomization.yaml
 
       - name: Publish pinned overlay to the GitOps 'production' branch
@@ -184,6 +188,7 @@ jobs:
           git config user.email "deploy-bot@users.noreply.github.com"
           git add deploy/overlays/production/kustomization.yaml
           git commit -m "chore(deploy): roll to ${{ github.sha }}"
+          # Voller Refname, sonst legt der allererste Push den Branch nicht an.
           git push --force origin HEAD:refs/heads/production
 
       - name: Report the deployed tag

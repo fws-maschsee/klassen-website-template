@@ -241,6 +241,7 @@ test.describe('MCP-Endpunkt', () => {
 			zeile,
 			'die verbundene Anwendung steht in der Verwaltung',
 		).toBeVisible()
+		// Playwright weist window.confirm sonst still ab, und der Klick liefe ins Leere.
 		page.on('dialog', (dialog) => dialog.accept())
 		await zeile.getByRole('button', { name: 'Zugriff beenden' }).click()
 		await page.waitForLoadState('networkidle')
@@ -264,6 +265,7 @@ test.describe('MCP-Endpunkt', () => {
 	})
 })
 
+// ZITADEL ist ereignisbasiert: der PUT ist beantwortet, bevor die lesenden Projektionen ihn kennen.
 const erwarteRollen = async (
 	zitadel: { rolesOf: (user: StackUser) => Promise<string[]> },
 	user: StackUser,

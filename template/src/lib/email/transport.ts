@@ -16,6 +16,7 @@ export type SendInput = {
 	text: string
 	attachments?: SendAttachment[]
 	sender?: string
+	// Für Listen nötig: sonst nimmt nodemailer from als Return-Path und SES scheitert am SPF/DKIM-Alignment.
 	envelope?: { from: string; to: string }
 	headers?: Record<string, string>
 }
@@ -47,6 +48,7 @@ const buildSesTransport = (): Transporter => {
 	cached = nodemailer.createTransport({
 		host: process.env.SES_SMTP_HOST ?? SES_DEFAULT_HOST,
 		port,
+		// 465 ist implizites TLS, 2587 und 587 sind STARTTLS.
 		secure: port === 465,
 		requireTLS: port !== 465,
 		auth: {

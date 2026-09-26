@@ -37,6 +37,7 @@ export type AccessToken = {
 	token_hash: string
 	client_id: string
 	user_id: string
+	// Nur Protokoll der Zustimmung; maßgeblich ist die Laufzeitabfrage bei ZITADEL (auth/grants.ts).
 	roles: string[] | null
 	scopes: string[] | null
 	resource: string | null
@@ -418,6 +419,7 @@ export const rotateRefreshToken = (
 		{
 			client_id: row.client_id,
 			user_id: row.user_id,
+			// Unverändert weiter: ein Refresh ist keine neue Zustimmung, neue Rollen erst nach neuer Anmeldung.
 			roles: parseJsonArray(row.roles),
 			scopes: parseJsonArray(row.scopes),
 			resource: row.resource,

@@ -23,12 +23,16 @@ import { CLASS_NAME, REPO_URL, SITE_URL } from './src/site.config'
 
 export default defineConfig({
 	site: SITE_URL,
+	// SSR, weil ein statischer Build alle Berichte ohne Anmeldung ausliefern würde.
 	output: 'server',
 	adapter: node({
+		// server.ts hängt Astro in Express ein, damit /mcp und die OAuth-Routen daneben laufen.
 		mode: 'middleware',
 	}),
+	// Hinter Express greift der Origin-Check nicht zuverlässig; die Consent-Seite schützen PKCE und das zufällige pending_id.
 	security: { checkOrigin: false },
 	markdown: {
+		// Reihenfolge ist bindend: das Label-Plugin muss zwischen Directive und Admonitions laufen.
 		remarkPlugins: [remarkDirective, remarkAdmonitionLabels, remarkAdmonitions],
 	},
 	integrations: [
@@ -52,6 +56,7 @@ export default defineConfig({
 				{
 					src: ANALYTICS_SCRIPT_URL,
 					defer: true,
+					// Die in Plausible angelegte Domain, nicht vom Klassennamen ableiten.
 					'data-domain': SITE_DOMAIN,
 				},
 			],

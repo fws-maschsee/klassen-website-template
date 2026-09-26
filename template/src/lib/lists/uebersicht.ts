@@ -50,16 +50,19 @@ const schreibrecht = (
 		gruppen: listPosterGroups(list).map((key) => groupLabel(key, db)),
 		muster: muster.filter(istDomainMuster),
 		adressen: darfPersonenSehen ? adressen : [],
+		// Anzahl statt stiller Lücke: dass es weitere gibt, darf jeder wissen, nur nicht welche.
 		verborgeneAdressen: darfPersonenSehen ? 0 : adressen.length,
 		auchEmpfaenger: list.broadcast === 1,
 	}
 }
 
+// Zur Laufzeit aus der DB statt von Hand im Text: eine abgeschriebene Adresse veraltet, Antworten gingen ins Leere.
 export const verteilerUebersicht = (
 	darfPersonenSehen: boolean,
 	db: Database = openDb(),
 ): VerteilerAnsicht[] => {
 	const domain = listDomain()
+	// Inaktive Listen nehmen keine Post an; eine abprallende Adresse anzuzeigen ist schlimmer als sie wegzulassen.
 	return listMailingLists(db)
 		.filter((list) => list.aktiv === 1)
 		.map((list) => {
@@ -69,6 +72,7 @@ export const verteilerUebersicht = (
 			return {
 				adresse: `${list.address}@${domain}`,
 				label: list.label,
+				// Gruppen, keine Personen und keine Anzahl: in einer Klasse ließe sich sonst erraten, wer gemeint ist.
 				empfaengerGruppen: direkt.map((key) => groupLabel(key, db)),
 				weitereUeberUntergruppen: nurUeberUntergruppen.map((key) =>
 					groupLabel(key, db),

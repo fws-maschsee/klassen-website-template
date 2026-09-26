@@ -4,6 +4,7 @@ import type { MitgliedInput, MitgliedRow } from './types.js'
 
 export const GROUP_ELTERN = 'eltern'
 
+// Aufgezählt statt SELECT *: zitadel_user_id ist interne Verknüpfung und gehört in keine UI- oder MCP-Ausgabe.
 const COLUMNS = 'id, first_name, last_name, email, created_at, updated_at'
 
 const cols = (alias: string): string =>
@@ -29,6 +30,7 @@ export const uniqueMemberId = (
 	db: Database = openDb(),
 	keepId?: string,
 ): string => {
+	// Gleichnamige Personen sind in einer Klasse möglich, deshalb Suffix -2, -3 statt UNIQUE-Index auf den Namen.
 	const base = slugify(firstName, lastName)
 	const start = base === '' ? 'person' : base
 	const taken = db.prepare<[string], { id: string }>(
@@ -69,6 +71,7 @@ export const listMitgliederByGroupEffective = (
 ): MitgliedRow[] =>
 	db
 		.prepare<[string], MitgliedRow>(
+			// UNION statt UNION ALL: terminiert auch bei einem Zyklus in Altdaten.
 			`WITH RECURSIVE subtree(key) AS (
          SELECT ?
          UNION
@@ -132,6 +135,7 @@ export const searchMitglieder = (
 	filter: MitgliederSearchFilter,
 	db: Database = openDb(),
 ): MitgliedRow[] => {
+	// Filter in JS statt SQL-LIKE: LIKE ignoriert Diakritika nicht, und eine Klasse ist klein.
 	let rows = filter.group
 		? listMitgliederByGroupEffective(filter.group, db)
 		: listMitglieder(db)
@@ -204,6 +208,7 @@ export const upsertMitglied = (
 	return row
 }
 
+// Ohne eigene Transaktion: läuft in bulkUpsertMitglieder, und better-sqlite3 kann nicht schachteln.
 const syncGroups = (
 	mitgliedId: string,
 	groupKeys: string[],

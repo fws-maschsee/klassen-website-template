@@ -2,14 +2,18 @@ export const CLASS_NAME = '{{ class_display_name }}'
 
 export const SCHOOL_NAME = '{{ school_name }}'
 
+// Wandert beim Lehrerwechsel nicht mit: DNS, Zertifikat, Ingress, Lesezeichen und Kalender-Abos hängen daran.
 export const SITE_DOMAIN = '{{ site_domain }}'
 
 export const SITE_URL = `https://${SITE_DOMAIN}`
 
 export const REPO_URL = 'https://github.com/{{ github_org }}/{{ repo_name }}'
 
+// Gleicher Name wie in den Nachbarklassen ist sicher: das Token trägt nur Rollen des Projekts dieses OIDC-Clients.
+// Ändern sperrt alle aus, solange Rolle und Grants in ZITADEL nicht umgehängt sind.
 export const AUTH_ROLE = 'mitglied'
 
+// Dateiname bleibt beim Lehrerwechsel: die Eltern haben die Adresse abonniert, sonst stehen die Abos still.
 export const CALENDAR_PATH = '/public/{{ calendar_filename }}'
 
 export const CALENDAR_WEBCAL_URL = `webcal://${SITE_DOMAIN}${CALENDAR_PATH}`

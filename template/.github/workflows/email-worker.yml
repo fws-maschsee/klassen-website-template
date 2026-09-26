@@ -11,6 +11,7 @@ on:
       - 'email-worker/**'
       - '.github/workflows/email-worker.yml'
 
+# Nur Prüfung: deployt wird ausschließlich über Cloudflare Workers Builds aus main, nie per wrangler.
 jobs:
   test:
     name: Typecheck und Tests

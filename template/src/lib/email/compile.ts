@@ -18,6 +18,7 @@ const stripHtmlTags = (html: string): string =>
 export const compile = async (
 	mjmlString: string,
 ): Promise<{ html: string; text: string }> => {
+	// await, obwohl MJML 4 synchron ist: MJML 5 liefert ein Promise, so geht beides ohne Codeänderung.
 	const { html, errors } = await mjml2html(mjmlString, {
 		validationLevel: 'strict',
 	})

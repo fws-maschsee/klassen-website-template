@@ -4,8 +4,8 @@ metadata:
   name: {{ repo_name }}
   namespace: {{ repo_name }}
 spec:
-  replicas: 1
-  revisionHistoryLimit: 0
+  replicas: 1 # SQLite und die In-Prozess-Caches setzen genau eine Replik voraus
+  revisionHistoryLimit: 0 # alte ReplicaSets halten Image-Layer auf der einzigen Node-Platte fest
   progressDeadlineSeconds: 120
   selector:
     matchLabels:
@@ -17,18 +17,20 @@ spec:
     spec:
       containers:
         - name: app
-          image: ghcr.io/{{ github_org }}/{{ repo_name }}
+          image: ghcr.io/{{ github_org }}/{{ repo_name }} # Tag pinnt kustomization.yaml
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
               containerPort: 3000
           env:
             - name: HOST
-              value: "::"
+              value: "::" # dual-stack
             - name: PORT
               value: "3000"
+            # Zeichengenau wie die redirect_uri am OIDC-Client; ohne den Wert meldet Astro hier localhost.
             - name: OIDC_PUBLIC_ORIGIN
               value: "https://{{ site_domain }}"
+            # Aussteller des MCP-OAuth-Servers; MCP-Clients verwerfen Tokens, deren Aussteller nicht zeichengenau passt.
             - name: PUBLIC_BASE_URL
               value: "https://{{ site_domain }}"
             - name: ZITADEL_ORG_ID
@@ -40,14 +42,16 @@ spec:
                 name: {{ repo_name }}-oidc
             - secretRef:
                 name: {{ repo_name }}-mail
+            # Infrastruktur-Credential: von Hand im Cluster angelegt, deshalb kein SealedSecret im Repo.
             - secretRef:
                 name: {{ repo_name }}-zitadel
           resources:
             requests:
               cpu: 50m
               memory: 192Mi
-            limits:
+            limits: # bewusst ohne CPU-Limit: auf dem Single-Tenant-Node brächte es nur Throttling
               memory: 512Mi
+          # TCP statt httpGet: unangemeldet antwortet / mit 302/401, und das ist gesund.
           readinessProbe:
             tcpSocket:
               port: http
@@ -83,4 +87,4 @@ spec:
         runAsNonRoot: true
         runAsUser: 1000
         runAsGroup: 1000
-        fsGroup: 1000
+        fsGroup: 1000 # local-path legt das Volume als root an

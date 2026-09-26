@@ -9,9 +9,8 @@ In diesem Repository wird **auf Deutsch** kommuniziert: Commit-Nachrichten,
 Issues, Dokumentation, Antworten.
 
 ## Minimal comments policy
-
-Keine Kommentare. Guter Code, sprechende Namen und Tests erklären sich selbst.
-Erlaubt ist nur, was muss: Werkzeug-Direktiven (biome-ignore, @ts-expect-error, Shebang …) und höchstens eine Zeile für ein Warum, das kein Name ausdrücken kann. Keine Docstrings, keine Begründungsabsätze, kein auskommentierter Code.
+„Comments are apologies.“ Guter Code, sprechende Namen und Tests erklären sich selbst — normalerweise kein Kommentar.
+Wo Code unerwartet ist (ungewöhnliche Wahl, Workaround, Einschränkung von außen, bewusst gegen die naheliegende Lösung), ist ein kurzer Warum-Kommentar Pflicht. Kein Was, keine Fehlergeschichte, keine Docstrings, kein auskommentierter Code. Werkzeug-Direktiven bleiben.
 
 ## Was das ist
 
@@ -205,6 +204,20 @@ Weichen beide voneinander ab, fährt der Server gar nicht erst hoch. Derselbe
 Wert muss außerdem mit `CLASS_SLUG` in `email-worker/wrangler.toml`
 übereinstimmen, denn der Worker schickt die Klasse als `X-List-Class` mit und
 die App weist Post einer fremden Klasse ab.
+
+## Rundmails
+
+Eine Rundmail ist eine Datei unter `emails/`: `emails/_beispiel.ts` kopieren und
+mit Datumspräfix benennen; der Dateiname ohne `.ts` ist der Slug. Dateien mit
+`_` am Anfang ignoriert der Loader.
+
+- **Der Slug ist der Idempotenz-Schlüssel.** Jede Person bekommt eine Mail mit
+  demselben Slug nur einmal. Eine Korrektur geht unter einem neuen Slug raus
+  (Konvention: Suffix `-v2`).
+- `skip: { reason: "…" }` stoppt eine Mail dauerhaft; `sentExternally: { date:
+  "JJJJ-MM-TT" }` archiviert eine anderweitig verschickte.
+- In die Dateien gehört nur Text, nie Namen oder Adressen von Eltern: die
+  Empfänger kommen allein aus der Datenbank.
 
 ## Mailinglisten
 
