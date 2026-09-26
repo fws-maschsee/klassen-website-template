@@ -5,6 +5,7 @@ import { slugify, uniqueMemberId } from '../../lib/db/members.js'
 import { clearGrantsCache, type GrantedUser, usersWithRole } from './grants.js'
 import { ROLE_MITGLIED } from './roles.js'
 
+// Nur noch, um Zeilen aus der Zeit vor zitadel_user_id zu erkennen und umzuschlüsseln.
 export const MIRROR_ID_PREFIX = 'zitadel-'
 
 export const memberGroupKey = (): string =>
@@ -34,6 +35,7 @@ const splitName = (user: GrantedUser): { first: string; last: string } => {
 	if (user.firstName || user.lastName) {
 		return { first: user.firstName, last: user.lastName }
 	}
+	// Lokaler Teil der Adresse statt eines leeren Namens in der Anrede.
 	const local = user.email.split('@')[0]
 	return { first: local, last: '' }
 }
@@ -41,10 +43,12 @@ const splitName = (user: GrantedUser): { first: string; last: string } => {
 export const syncMembersFromZitadel = async (
 	db: Database = openDb(),
 ): Promise<MirrorResult> => {
+	// Ein ausdrücklicher Abgleich will den frischesten Stand, nicht den 5-Sekunden-Cache.
 	clearGrantsCache()
 	const granted = await usersWithRole(memberRole())
 	const groupKey = memberGroupKey()
 
+	// Idempotent angelegt, sonst scheitert die Zuordnung in einer frischen Klasse.
 	upsertGroup({ key: groupKey, label: 'Eltern', aktiv: true }, db)
 
 	const existing = db
@@ -74,6 +78,8 @@ export const syncMembersFromZitadel = async (
 	)
 	const drop = db.prepare<[string]>('DELETE FROM mitglieder WHERE id = ?')
 
+	// Neu anlegen, Verweise umhängen, alt löschen statt UPDATE der id: die FKs haben ON DELETE CASCADE, aber kein ON UPDATE.
+	// list_outbound hat gar keinen FK und muss von Hand mit.
 	const rekeyLegacyRow = (row: MirroredRow, first: string, last: string) => {
 		const neu = uniqueMemberId(first, last, db, row.id)
 		if (neu === row.id) return row.id
@@ -82,7 +88,7 @@ export const syncMembersFromZitadel = async (
 			first_name: first,
 			last_name: last,
 			email: row.email,
-			zitadel_user_id: null,
+			zitadel_user_id: null, // Erst null: die Nummer ist eindeutig und hängt noch an der alten Zeile.
 		})
 		for (const sql of [
 			'UPDATE group_memberships SET mitglied_id = ? WHERE mitglied_id = ?',

@@ -17,6 +17,7 @@ import { syncMembersFromZitadel } from '../../../server/auth/mirror.js'
 
 export const prerender = false
 
+// Zweite Verteidigungslinie neben dem Worker-Limit, falls jemand den Endpunkt direkt anspricht.
 const DEFAULT_MAX_BYTES = 10 * 1024 * 1024
 
 const maxBytes = (): number =>
@@ -34,6 +35,7 @@ export const POST: APIRoute = async ({ request }) => {
 		rawBody,
 	})
 	if (!sig.ok) {
+		// error statt reason: 401 ist für den Worker unsere Störung, nichts für den Absender; er stellt später erneut zu.
 		return Response.json({ error: sig.reason }, { status: 401 })
 	}
 
@@ -46,6 +48,7 @@ export const POST: APIRoute = async ({ request }) => {
 	}
 
 	const className = request.headers.get(HEADER_CLASS)
+	// Doppelt zum Worker-Check: deckt eine falsche Worker-Variable auf, bevor Post in der falschen Klasse landet.
 	if (className && className !== instanceName()) {
 		console.error(
 			`[lists/incoming] Mail für Klasse "${className}" bei Instanz "${instanceName()}" abgewiesen - Routing-Regel prüfen`,
@@ -75,6 +78,7 @@ export const POST: APIRoute = async ({ request }) => {
 	}
 
 	try {
+		// Hier statt in handleIncomingListMail, damit die Verteilung ohne Netz testbar bleibt.
 		const mirror = await syncMembersFromZitadel()
 		if (mirror.added || mirror.updated || mirror.removed) {
 			console.log(
@@ -82,6 +86,7 @@ export const POST: APIRoute = async ({ request }) => {
 			)
 		}
 	} catch (error) {
+		// Nicht abbrechen: eine nie verteilte Mail fällt niemandem auf, ein fehlender Neuzugang schon eher.
 		console.error(
 			`[lists] Abgleich mit ZITADEL fehlgeschlagen, verteile mit dem letzten Stand: ${(error as Error).message}`,
 		)
@@ -96,6 +101,7 @@ export const POST: APIRoute = async ({ request }) => {
 		return Response.json(result, { status: statusForResult(result) })
 	} catch (err) {
 		console.error('[lists/incoming] unerwarteter Fehler', err)
+		// 5xx heißt für den Worker: später erneut zustellen.
 		return Response.json(
 			{ error: err instanceof Error ? err.message : String(err) },
 			{ status: 500 },

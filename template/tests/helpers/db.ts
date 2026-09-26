@@ -28,6 +28,7 @@ export const createTestDb = (): DatabaseType => {
 const extractUpSection = (content: string): string | undefined => {
 	const start = content.indexOf('-- migrate:up')
 	if (start === -1) return undefined
+	// Ab Zeilenende: dbmate-Optionen hinter dem Marker (transaction:false) sind kein SQL.
 	const lineEnd = content.indexOf('\n', start)
 	const afterMarker = lineEnd === -1 ? '' : content.slice(lineEnd + 1)
 	const end = afterMarker.indexOf('-- migrate:down')

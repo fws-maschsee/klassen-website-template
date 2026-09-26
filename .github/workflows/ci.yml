@@ -29,6 +29,7 @@ jobs:
 
       - name: Keine unersetzten Platzhalter
         run: |
+          # Nach den copier-Variablen suchen, nicht nach `{{`: Workflows enthalten legitim `${{ … }}`.
           NAMES=$(grep -E '^[a-z_]+:' copier.yml | cut -d: -f1 | paste -sd'|')
           echo "geprüfte Variablen: $NAMES"
           if grep -RInE "\{\{[[:space:]]*($NAMES)" "$INSTANCE" \
@@ -205,11 +206,13 @@ jobs:
 
       - name: Smoke-Test unter Cluster-Bedingungen
         run: |
+          # Wie im Cluster: non-root, read-only rootfs; /data muss beschreibbar sein, sonst scheitert dbmate.
           docker run -d --name smoke \
             --user 1000:1000 --read-only --tmpfs /tmp --tmpfs /data \
             -p 3000:3000 klassenseite:verify
           CODE=000
           for _ in $(seq 1 30); do
+            # Nur `|| true`: curl gibt selbst 000 aus, ein `|| echo 000` ergäbe 000000.
             CODE=$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:3000/ || true)
             [ "$CODE" != "000" ] && [ -n "$CODE" ] && break
             sleep 2
@@ -221,6 +224,7 @@ jobs:
               docker rm -f smoke >/dev/null
               echo "::error::Server hat nie geantwortet"; exit 1 ;;
           esac
+          # Ohne Login erreichbar, sonst aktualisieren die webcal-Abos der Eltern still nicht mehr.
           ICS=$(curl -s -o /dev/null -w '%{http_code}' \
             http://127.0.0.1:3000/public/musterfrau.ics || true)
           docker rm -f smoke >/dev/null
@@ -236,7 +240,7 @@ jobs:
     steps:
       - uses: actions/checkout@v5
         with:
-          fetch-depth: 0
+          fetch-depth: 0 # HEAD~1 wird gebraucht
       - uses: astral-sh/setup-uv@v5
 
       - name: Instanz aus der Vorgänger-Revision erzeugen

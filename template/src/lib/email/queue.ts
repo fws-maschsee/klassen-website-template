@@ -80,6 +80,7 @@ export const enqueueEmailToRecipients = async (
 					.map((r) => r.mitglied_id),
 			)
 
+	// Sonst läge dieselbe Mail nach einem zweiten send_email-Aufruf doppelt in der Queue.
 	const alreadyQueued = new Set(
 		db
 			.prepare<[string], { mitglied_id: string }>(
@@ -89,6 +90,7 @@ export const enqueueEmailToRecipients = async (
 			.map((r) => r.mitglied_id),
 	)
 
+	// Rundmails kennen keine Listenadresse, also nur globale Sperren (harte Bounces, Beschwerden).
 	const suppressed = globallySuppressedAddresses(db)
 
 	const tx = db.transaction(() => {
@@ -209,6 +211,7 @@ export const processBatch = async (
 
 	const cap = hourlyCap()
 	const sent = countSentInLastHour(db)
+	// Früh aufhören: über dem Stunden-Cap drosselt SES selbst und wirft Fehler.
 	if (sent >= cap) {
 		const oldest = oldestSentInLastHour(db)
 		const waitUntil = oldest

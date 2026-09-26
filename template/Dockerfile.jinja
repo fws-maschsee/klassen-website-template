@@ -1,5 +1,6 @@
 FROM node:22-alpine AS builder
 
+# better-sqlite3 hat für musl nicht zu jeder Node-Version ein Prebuild.
 RUN apk add --no-cache python3 make g++
 
 WORKDIR /app
@@ -33,9 +34,11 @@ ENV HOST=::
 ENV PORT=3000
 
 ENV OIDC_ISSUER={{ oidc_issuer }}
+# Muss zu AUTH_ROLE in src/site.config.ts passen.
 ENV OIDC_REQUIRED_ROLE=mitglied
 ENV AUTH_PROVIDER=zitadel
 
+# Muss CLASS_SLUG in email-worker/wrangler.toml entsprechen, sonst weist die App die Listenpost als fremd ab.
 ENV MCP_INSTANCE_NAME={{ repo_name }}
 ENV MCP_INSTANCE_LABEL="{{ class_display_name }}"
 
@@ -47,6 +50,7 @@ COPY --from=prod-deps /app/node_modules ./node_modules
 
 COPY --from=builder /app/dist ./dist
 
+# server.ts und src/** laufen zur Laufzeit als TypeScript über tsx, nicht aus dist.
 COPY --from=builder /app/server.ts ./server.ts
 COPY --from=builder /app/src ./src
 COPY --from=builder /app/db ./db

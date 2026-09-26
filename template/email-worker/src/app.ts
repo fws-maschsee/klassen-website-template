@@ -11,6 +11,7 @@ export class TemporaryFailure extends Error {}
 export const headerSafe = (value: string, maxLength = 320): string =>
 	value.replace(/[^ -~]/g, '').slice(0, maxLength)
 
+// SMTP-Antworten sind ohne SMTPUTF8 reines ASCII; umschreiben statt löschen, Eltern lesen den Text.
 const TRANSLITERATION: Record<string, string> = {
 	ä: 'ae',
 	ö: 'oe',
@@ -38,7 +39,9 @@ const reasonOf = (body: string): string => {
 			const reason = (parsed as { reason: unknown }).reason
 			if (typeof reason === 'string') return reason
 		}
-	} catch {}
+	} catch {
+		// kein JSON: der Body selbst ist der Text
+	}
 	return body
 }
 
@@ -56,6 +59,7 @@ export const deliver = async (
 	try {
 		response = await fetch(config.incomingUrl, {
 			method: 'POST',
+			// Metadaten nur in Headern: der Body bleibt byteweise die Originalmail, die die Signatur abdeckt.
 			headers: {
 				'Content-Type': 'message/rfc822',
 				'X-List-Class': recipient.class,
@@ -87,6 +91,7 @@ export const deliver = async (
 			reason: rejectReason(reasonOf(body), 'Nachricht abgelehnt'),
 		}
 	}
+	// Auch 401: eine falsche Signatur ist unser Konfigurationsfehler, nicht der des Absenders.
 	throw new TemporaryFailure(
 		`App antwortete ${response.status}: ${body.slice(0, 200)}`,
 	)

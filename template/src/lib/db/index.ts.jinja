@@ -10,7 +10,7 @@ export const openDb = (path?: string): DatabaseType => {
 	if (cached) return cached
 	const db = new Database(path ?? dbPath())
 	db.pragma('journal_mode = WAL')
-	db.pragma('foreign_keys = ON')
+	db.pragma('foreign_keys = ON') // SQLite-Vorgabe ist AUS, pro Verbindung; ohne greifen die CASCADEs nicht
 	db.pragma('synchronous = NORMAL')
 	cached = db
 	return db

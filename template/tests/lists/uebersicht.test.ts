@@ -198,6 +198,7 @@ describe('Keine fest verdrahteten Adressen mehr', () => {
 	}
 
 	test('in Seiten und Inhalten steht keine Verteiler-Adresse als Text', () => {
+		// Verteiler-Adressen, die abgelöste Mailman-Domain, Google-Gruppen: als Text veralten sie unbemerkt, sie gehören nach /verteiler.
 		const verdaechtig =
 			/[\w.-]+@[\w.-]*lists\.[\w.-]+|lists\.klasse-[\w.-]+|[\w.-]+@[\w.-]*googlegroups\.com/i
 		const fundstellen = textDateien()

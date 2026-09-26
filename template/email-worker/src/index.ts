@@ -17,6 +17,7 @@ export const handleEmail = async (
 	message: IncomingMessage,
 	env: Env,
 ): Promise<void> => {
+	// Wirft bei Fehlkonfiguration -> temporärer Fehler; eine vergessene Variable darf keine Post dauerhaft abweisen.
 	const config = readConfig(env)
 
 	const parsed = parseListRecipient(
@@ -43,6 +44,7 @@ export const handleEmail = async (
 	const messageId = message.headers.get('message-id')
 	const raw = new Uint8Array(await new Response(message.raw).arrayBuffer())
 
+	// Envelope-Absender statt From-Header: nur er läuft gegen SPF.
 	const verdict = await deliver(config, recipient, message.from, messageId, raw)
 	if (verdict.kind === 'rejected') {
 		message.setReject(verdict.reason)
@@ -57,6 +59,7 @@ export default {
 			const reason =
 				error instanceof TemporaryFailure ? 'temporär' : 'unerwartet'
 			console.error(`Zustellung an die App fehlgeschlagen (${reason}):`, error)
+			// Weiterwerfen ergibt einen temporären SMTP-Fehler; der Absender stellt später erneut zu.
 			throw error
 		}
 	},

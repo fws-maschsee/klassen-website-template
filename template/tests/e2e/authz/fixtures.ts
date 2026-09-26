@@ -93,6 +93,7 @@ export class Zitadel {
 			'/management/v1/users/grants/_search',
 			{
 				query: { limit: 1000 },
+				// Nicht per userIdQuery: die liefert an dieser Schnittstelle still null Zeilen.
 				queries: [{ projectIdQuery: { projectId: this.stack.ownProjectId } }],
 			},
 		)
@@ -101,6 +102,7 @@ export class Zitadel {
 		const row = rows.find((entry) => entry.userId === user.userId)
 		if (
 			!row ||
+			// Exakter Vergleich: auch USER_GRANT_STATE_INACTIVE endet auf ACTIVE.
 			(row.state ?? 'USER_GRANT_STATE_ACTIVE') !== 'USER_GRANT_STATE_ACTIVE'
 		) {
 			return []
@@ -118,6 +120,8 @@ export const signIn = async (
 	await page.goto(options.startAt ?? '/')
 
 	await page.waitForURL(/\/ui\/v2\/login\/loginname/, { timeout: 30_000 })
+	// Beim clientseitigen Umschalten stehen kurz die Felder zweier Seiten im Dokument; toHaveCount(1) wartet das ab.
+	// data-testid statt Beschriftung, weil Login v2 mehrsprachig ist.
 	const loginName = page.locator('input[name="loginName"]')
 	await expect(loginName).toHaveCount(1)
 	await loginName.fill(user.email)

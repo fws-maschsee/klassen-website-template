@@ -23,6 +23,7 @@ export const recordInstanceIfEmpty = (
 	db: Database = openDb(),
 ): string => {
 	const existing = getRecordedInstance(db)
+	// Nie überschreiben: der Wert in der Datei ist die Wahrheit, die Env nur eine Behauptung darüber.
 	if (existing) return existing
 	db.prepare<[string, string]>(
 		'INSERT INTO app_meta (key, value) VALUES (?, ?)',

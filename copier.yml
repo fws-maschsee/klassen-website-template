@@ -4,6 +4,7 @@ _envops:
   trim_blocks: true
   lstrip_blocks: true
 
+# Zustand der Klasse, den ein Update nicht zurücksetzen darf: Lockfiles (Dependabot), gepinnter Image-Tag, echte SealedSecrets.
 _skip_if_exists:
   - package-lock.json
   - email-worker/package-lock.json

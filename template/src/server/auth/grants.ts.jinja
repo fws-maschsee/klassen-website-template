@@ -47,6 +47,7 @@ export const resetGrantsConfig = (): void => {
 	cache = null
 }
 
+// Exakter Vergleich statt endsWith('ACTIVE'): auch USER_GRANT_STATE_INACTIVE endet so.
 const ACTIVE_STATE = 'USER_GRANT_STATE_ACTIVE'
 
 type GrantRow = {
@@ -95,6 +96,8 @@ const search = async (
 	return body.result ?? []
 }
 
+// Fängt ein Bündel aus tools/list und mehreren tools/call ab; kurz genug, dass ein Entzug sofort wirkt.
+// Im Prozess zulässig, weil der Dienst mit genau einer Replik läuft.
 const CACHE_TTL_MS = 5000
 let cache: { at: number; rows: GrantRow[] } | null = null
 
@@ -105,6 +108,7 @@ export const clearGrantsCache = (): void => {
 const projectGrants = async (): Promise<GrantRow[]> => {
 	if (cache && Date.now() - cache.at < CACHE_TTL_MS) return cache.rows
 	const config = getGrantsConfig()
+	// Bewusst nicht per userIdQuery: die liefert gegen diese ZITADEL-Instanz still null Zeilen.
 	const rows = (
 		await search([{ projectIdQuery: { projectId: config.projectId } }])
 	).filter(isActive)

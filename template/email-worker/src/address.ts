@@ -9,15 +9,16 @@ export type ParseResult =
 	| { ok: true; value: ParsedRecipient }
 	| { ok: false; reason: string }
 
+// Bewusst streng: Klasse und Liste landen in HTTP-Headern und in der Ablehnung an den Absender.
 const SLUG = /^[a-z0-9]+(?:-[a-z0-9]+)*$/
 
 export const isSlug = (value: string): boolean => SLUG.test(value)
 
 const TAG = /^[a-z0-9._-]+$/
 
-const MAX_LABEL_LENGTH = 63
+const MAX_LABEL_LENGTH = 63 // DNS-Label-Grenze
 
-const MAX_LOCALPART_LENGTH = 64
+const MAX_LOCALPART_LENGTH = 64 // RFC 5321
 
 export const parseListRecipient = (
 	rcptTo: string,
@@ -57,6 +58,7 @@ export const parseListRecipient = (
 	if (localpart.length > MAX_LOCALPART_LENGTH) {
 		return { ok: false, reason: 'Localpart zu lang' }
 	}
+	// Sonst ginge `eltern+@x@klasse-….` als Liste `eltern` durch.
 	if (localpart.includes('@')) {
 		return { ok: false, reason: 'mehrere @ in der Adresse' }
 	}

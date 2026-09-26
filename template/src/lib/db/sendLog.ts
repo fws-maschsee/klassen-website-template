@@ -77,6 +77,7 @@ export const countByStatus = (
 ): SendCounts => {
 	const rows = db
 		.prepare<[string], { last_status: string; count: number }>(
+			// Nur der letzte Eintrag je Person zählt: später erfolgreich wiederholte Fehlversuche sollen nicht als Fehler dastehen.
 			`SELECT last_status, COUNT(*) AS count FROM (
          SELECT s1.status AS last_status
          FROM email_send_log s1
@@ -163,10 +164,12 @@ export const peekQueued = (
 export const claimQueued = (id: number, db: Database = openDb()): boolean =>
 	db
 		.prepare<[number]>(
+			// Nur wer changes === 1 bekommt, versendet: schützt vor Doppelversand paralleler Batches.
 			"UPDATE email_send_log SET status = 'sending', claimed_at = datetime('now') WHERE id = ? AND status = 'queued'",
 		)
 		.run(id).changes === 1
 
+// Ohne Altersgrenze: direkt nach einem Neustart kann nichts legitim gerade gesendet werden.
 export const cleanupStuckOnBoot = (db: Database = openDb()): number =>
 	db
 		.prepare<[string]>(
@@ -179,6 +182,7 @@ export const cleanupStuckOnBoot = (db: Database = openDb()): number =>
 		.run('Worker-Neustart hat den Versand unterbrochen - bitte erneut senden')
 		.changes
 
+// nodemailer beendet hängende SMTP-Verbindungen nicht immer mit einem Fehler.
 export const cleanupStuckByTimeout = (
 	db: Database = openDb(),
 	maxAgeSeconds = 30,

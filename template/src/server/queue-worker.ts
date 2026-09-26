@@ -18,6 +18,7 @@ const tick = async (): Promise<void> => {
 	if (running) return
 	running = true
 	try {
+		// SMTP-Stalls enden nicht mit einem Fehler; ohne Aufräumen blieben sending-Einträge für immer liegen.
 		const stuck =
 			cleanupStuckByTimeout(undefined, STUCK_TIMEOUT_SECONDS) +
 			cleanupStuckListOutbound(undefined, STUCK_TIMEOUT_SECONDS)
@@ -104,6 +105,7 @@ export const startQueueWorker = (
 ): void => {
 	if (timer) return
 	log(`Start (Poll alle ${Math.round(intervalMs / 1000)}s)`)
+	// sending aus einer früheren Inkarnation (Deploy, Crash, OOM) schließt sonst niemand mehr ab.
 	const cleaned = cleanupStuckOnBoot() + cleanupStuckListOutbound()
 	if (cleaned > 0)
 		log(`Boot-Aufraeumen: ${cleaned} verwaiste Eintraege auf error gesetzt`)

@@ -7,7 +7,7 @@ CREATE TABLE email_send_log (
   status        TEXT NOT NULL CHECK (status IN ('sent', 'error', 'skipped', 'queued', 'sending')),
   message_id    TEXT,
   error_message TEXT,
-  claimed_at    TEXT
+  claimed_at    TEXT -- ohne Zeitstempel blieben nach SMTP-Hänger oder Pod-Neustart Einträge ewig in `sending`
 );
 
 CREATE INDEX idx_send_log_slug_mitglied ON email_send_log (email_slug, mitglied_id);

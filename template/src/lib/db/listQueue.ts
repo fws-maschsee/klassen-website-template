@@ -45,6 +45,7 @@ export const enqueueListMessage = (
 	input: EnqueueListMessageInput,
 	db: Database = openDb(),
 ): EnqueueListMessageResult => {
+	// Der Worker stellt at-least-once zu; ein Retry derselben Mail darf nicht erneut verteilen.
 	if (input.idempotency_key) {
 		const existing = findListMessageByIdempotencyKey(input.idempotency_key, db)
 		if (existing) {
@@ -145,6 +146,7 @@ export const claimListOutbound = (
 ): boolean =>
 	db
 		.prepare<[number]>(
+			// Nur wer changes === 1 bekommt, versendet: schützt vor Doppelversand paralleler Batches.
 			"UPDATE list_outbound SET status = 'sending', claimed_at = datetime('now') WHERE id = ? AND status = 'queued'",
 		)
 		.run(id).changes === 1

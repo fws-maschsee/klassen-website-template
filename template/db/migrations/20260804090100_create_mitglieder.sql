@@ -11,6 +11,7 @@ CREATE TABLE mitglieder (
   updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
 );
 
+-- Bewusst kein UNIQUE auf (first_name, last_name): gleichnamige Eltern und Geschwister gibt es; die Kollision löst eine explizite id.
 CREATE INDEX idx_mitglieder_email ON mitglieder (email);
 
 CREATE TRIGGER trg_mitglieder_updated_at

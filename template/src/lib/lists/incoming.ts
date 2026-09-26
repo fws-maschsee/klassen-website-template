@@ -23,6 +23,7 @@ export const statusForResult = (result: IncomingResult): number => {
 	switch (result.kind) {
 		case 'enqueued':
 			return 202
+		// Annehmen statt ablehnen: eine Ablehnung an einen Autoresponder erzeugt nur Ping-Pong.
 		case 'skipped':
 			return 200
 		case 'unknown_list':
@@ -109,6 +110,7 @@ export const handleIncomingListMail = async (
 	if (!envelopeFrom.trim()) {
 		return { kind: 'rejected', reason: 'Die Nachricht hat keinen Absender.' }
 	}
+	// Envelope statt From-Header: nur er läuft gegen SPF; der Grund nennt bewusst keine Berechtigten, er geht an den Absender.
 	if (!isSenderAllowed(list, envelopeFrom, db)) {
 		return {
 			kind: 'rejected',
@@ -118,6 +120,7 @@ export const handleIncomingListMail = async (
 
 	const parsed = await simpleParser(rawBody)
 
+	// Schleifenschutz; mailparser fasst die List-*-Header unter dem strukturierten Header list zusammen.
 	const listHeader = parsed.headers.get('list') as { id?: unknown } | undefined
 	if (listHeader?.id) {
 		return {
@@ -166,6 +169,7 @@ export const handleIncomingListMail = async (
 			body_html: html,
 			body_text: text,
 			original_message_id: messageId,
+			// Ohne Message-ID keine Idempotenz: dann lieber verteilen als schlucken.
 			idempotency_key: messageId ? `${list.address}|${messageId}` : null,
 			attachments: parsed.attachments.map((a) => ({
 				filename: a.filename ?? null,

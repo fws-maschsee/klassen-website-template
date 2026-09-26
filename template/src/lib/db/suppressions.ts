@@ -85,6 +85,7 @@ export const suppressAddress = (
 	const email = normalizeEmail(input.email)
 	if (!email) throw new Error('suppressAddress: leere E-Mail-Adresse')
 	const listAddress = normalizeListAddress(
+		// Vorgabe global: eine unzustellbare Adresse ist auf jeder Liste unzustellbar.
 		input.list_address ?? GLOBAL_SUPPRESSION,
 	)
 

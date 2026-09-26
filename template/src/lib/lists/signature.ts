@@ -15,6 +15,7 @@ export const computeSignature = (
 	timestamp: string,
 	rawBody: Buffer | string,
 ): string =>
+	// Signatur statt Bearer-Token: bindet Inhalt und Zeitpunkt, ein abgefangener Request ist nicht wiederverwendbar.
 	createHmac('sha256', secret)
 		.update(`${timestamp}.`)
 		.update(rawBody)

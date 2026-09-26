@@ -18,6 +18,7 @@ export const buildListFrom = (
 ): string => {
 	const origin = sanitizeDisplay(message.from_name || message.from_email)
 	const display = sanitizeDisplay(`${origin} via ${list.label}`)
+	// From zeigt auf die Liste: SES signiert nur die eigene Domain, eine fremde From-Domain fiele durch DMARC.
 	return `"${display}" <${listAddressFull(list)}>`
 }
 

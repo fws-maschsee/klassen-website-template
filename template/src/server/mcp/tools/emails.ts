@@ -26,6 +26,7 @@ import {
 
 const toJson = (value: unknown): string => JSON.stringify(value, null, 2)
 
+// email_send_log zeigt per FK auf emails.slug; ohne diese Zeile scheitert das Einreihen.
 const syncEmailMeta = async (slug: string): Promise<void> => {
 	const email = await loadEmail(slug)
 	upsertEmailMeta({

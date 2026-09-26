@@ -27,9 +27,11 @@ export const authFromInfo = (info: AuthInfo | undefined): McpAuth => {
 	return { userId: typeof extra.userId === 'string' ? extra.userId : '' }
 }
 
+// Bei jedem Aufruf frisch aus ZITADEL: das Token überlebt per Refresh einen Entzug. auth.roles setzen nur Tests.
 export const rolesFor = async (auth: McpAuth): Promise<string[]> =>
 	auth.roles ?? rolesForUser(auth.userId)
 
+// Nachgebaut statt Parameters<registerTool>: das friert die Generics ein und macht alle Handler-Argumente zu any.
 type GuardedToolConfig<
 	InputArgs extends undefined | ZodRawShapeCompat | AnySchema,
 	OutputArgs extends ZodRawShapeCompat | AnySchema,
@@ -48,6 +50,8 @@ const HINT: Record<Capability, string> = {
 	bearbeiten: `\n\nAendert Daten und erfordert deshalb die Rolle "${ROLE_ADMIN}" im ZITADEL-Projekt dieser Klasse.`,
 }
 
+// Prüfung an der Registrierung, damit sie in keinem Handler fehlen kann; das Tool bleibt sichtbar,
+// damit ein Unberechtigter den Grund liest statt „unbekanntes Werkzeug“.
 export const registerGuardedTool = <
 	OutputArgs extends ZodRawShapeCompat | AnySchema = ZodRawShapeCompat,
 	InputArgs extends undefined | ZodRawShapeCompat | AnySchema = undefined,
@@ -90,6 +94,7 @@ export const registerGuardedTool = <
 		}) as ToolCallback<InputArgs>,
 	)
 
+// Auch Lesen geht durch den Wächter: ein Bearer-Token bleibt gültig, wenn der Grant schon weg ist.
 export const registerReadTool = <
 	OutputArgs extends ZodRawShapeCompat | AnySchema = ZodRawShapeCompat,
 	InputArgs extends undefined | ZodRawShapeCompat | AnySchema = undefined,

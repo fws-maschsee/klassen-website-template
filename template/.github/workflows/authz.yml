@@ -33,6 +33,7 @@ jobs:
 
       - name: Container-Images holen
         run: |
+          # Dieselben Versionen wie in tests/e2e/authz/stack.mjs.
           docker pull postgres:17-alpine
           docker pull ghcr.io/zitadel/zitadel:v4.13.1
           docker pull ghcr.io/zitadel/zitadel-login:v4.13.1

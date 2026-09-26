@@ -12,6 +12,7 @@ CREATE TABLE list_messages (
   received_at         TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
 );
 
+-- Der Worker liefert at-least-once; der Schlüssel verhindert eine zweite Verteilung. Partiell, damit Mails ohne Message-ID sich nicht blockieren.
 CREATE UNIQUE INDEX idx_list_messages_idempotency
   ON list_messages (idempotency_key)
   WHERE idempotency_key IS NOT NULL;

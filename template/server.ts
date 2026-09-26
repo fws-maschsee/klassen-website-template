@@ -10,11 +10,12 @@ import {
 import { mcpOAuthProvider } from './src/server/oauth/provider.js'
 import { startQueueWorker } from './src/server/queue-worker.js'
 
+// Vor allem anderen: eine fremde Datenbank hieße Versand an die falsche Klasse.
 const instance = assertInstanceMatches(openDb())
 
 const app = express()
 
-app.set('trust proxy', 1)
+app.set('trust proxy', 1) // echte Client-IPs hinter dem Ingress, u. a. fürs Rate-Limiting des MCP-SDK
 
 app.use(
 	mcpAuthRouter({
@@ -29,6 +30,7 @@ app.use('/mcp', express.json(), mcpAuthMiddleware, mcpRequestHandler)
 
 app.use(express.static('dist/client'))
 
+// In einer Variable, damit die Typprüfung das erst beim Build entstehende Modul nicht auflösen will.
 const astroEntry = './dist/server/entry.mjs'
 // biome-ignore lint/suspicious/noExplicitAny: der Astro-SSR-Handler ist untypisiert
 const { handler } = (await import(astroEntry)) as { handler: any }

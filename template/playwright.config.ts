@@ -2,6 +2,7 @@ import { defineConfig, devices } from '@playwright/test'
 
 export default defineConfig({
 	testDir: './tests/e2e',
+	// Diese Läufe haben DISABLE_AUTH; die authz-Tests brauchen echte Anmeldung (playwright.authz.config.ts).
 	testIgnore: '**/authz/**',
 	fullyParallel: true,
 	forbidOnly: !!process.env.CI,
@@ -19,6 +20,7 @@ export default defineConfig({
 		},
 	],
 	webServer: {
+		// data/ ist gitignoriert und fehlt in einer frischen Klasse; ohne das Verzeichnis scheitert dbmate.
 		command:
 			'mkdir -p data && npm run build && npm run db:migrate && npm start',
 		url: 'http://localhost:4321',

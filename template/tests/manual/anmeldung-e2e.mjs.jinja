@@ -37,7 +37,9 @@ try {
 	log('\n--- 2. Benutzername eingeben')
 	const userField = page.getByTestId('username-text-input')
 	await userField.waitFor({ timeout: 20000 })
+	// pressSequentially statt fill: ohne echte Tastaturereignisse bleibt der Weiter-Knopf der React-Oberfläche deaktiviert.
 	await userField.pressSequentially(LOGIN, { delay: 15 })
+	// Zurücklesen: bei zu schnellem Tippen verschluckt die Oberfläche Zeichen und meldet dann „User not found“.
 	let typed = await userField.inputValue()
 	if (typed !== LOGIN) {
 		log(`  Eingabe unvollstaendig (${typed}) — noch einmal`)
