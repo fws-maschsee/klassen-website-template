@@ -8,11 +8,9 @@ import type {
 	PosterPolicy,
 } from './types.js'
 
-/** Normalisiert eine E-Mail-Adresse fuer Vergleiche (trim + lowercase). */
 export const normalizeEmail = (email: string): string =>
 	email.trim().toLowerCase()
 
-/** Parst ein JSON-String-Array robust (z.B. `recipient_groups`). */
 const parseStringArray = (raw: string): string[] => {
 	try {
 		const parsed = JSON.parse(raw) as unknown
@@ -23,52 +21,29 @@ const parseStringArray = (raw: string): string[] => {
 	}
 }
 
-/** Parst ein JSON-Array von E-Mail-Adressen (lowercased, ohne Leereintraege). */
 const parseEmailArray = (raw: string): string[] =>
 	parseStringArray(raw)
 		.map(normalizeEmail)
 		.filter((v) => v.length > 0)
 
-/** Dedupliziert E-Mail-Adressen (lowercased), Reihenfolge bleibt erhalten. */
 const dedupeEmails = (emails: string[]): string[] => [
 	...new Set(emails.map(normalizeEmail).filter((v) => v.length > 0)),
 ]
 
-/** Group-Keys der Empfaenger einer Liste. */
 export const listRecipientGroups = (list: MailingListRow): string[] =>
 	parseStringArray(list.recipient_groups)
 
-/** Group-Keys der erlaubten Absender einer Liste. */
 export const listPosterGroups = (list: MailingListRow): string[] =>
 	parseStringArray(list.poster_groups)
 
-/**
- * Absenderrichtlinie der Liste. Unbekannte Werte gelten als
- * 'eingeschraenkt' — im Zweifel die engere Auslegung, nicht die weitere.
- */
 export const listPosterPolicy = (list: MailingListRow): PosterPolicy =>
 	list.poster_policy === 'offen' ? 'offen' : 'eingeschraenkt'
 
-/** Erlaubte Absender-Muster der Liste (lowercased). */
 export const listSenderPatterns = (list: MailingListRow): string[] =>
 	parseEmailArray(list.sender_patterns)
 
-/** `*@domain` (Domain-Platzhalter) statt voller Adresse? */
 const isDomainPattern = (pattern: string): boolean => pattern.startsWith('*@')
 
-/**
- * Trifft `email` auf `pattern`? Vergleich case-insensitiv.
- *
- *   anna@example.org    trifft genau diese Adresse
- *   *@example.org       trifft jede Adresse dieser Domain
- *
- * Der Stern steht nur ganz vorne und nur fuer den lokalen Teil. Die Domain
- * wird EXAKT verglichen: `*@example.org` trifft NICHT
- * `anna@mail.example.org`. Keine Subdomain-Magie — wer eine Subdomain
- * freigeben will, traegt sie eigens ein. Das ueberrascht sonst genau dann,
- * wenn es darauf ankommt: eine fremde Subdomain, die jemand kontrolliert,
- * duerfte sonst an die Elternliste schreiben.
- */
 export const matchesSenderPattern = (
 	email: string,
 	pattern: string,
@@ -86,11 +61,6 @@ const DOMAIN_RE =
 	/^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/
 const LOCAL_RE = /^[^@\s*]+$/
 
-/**
- * Prueft und normalisiert EIN Absender-Muster. Wirft mit einer erklaerenden
- * Meldung, damit ein Tippfehler beim Speichern auffaellt statt still eine
- * Adresse auszusperren (oder, schlimmer, eine falsche hereinzulassen).
- */
 export const normalizeSenderPattern = (raw: string): string => {
 	const pattern = normalizeEmail(raw)
 	const hint =
@@ -112,11 +82,6 @@ export const normalizeSenderPattern = (raw: string): string => {
 	return pattern
 }
 
-/**
- * Ein aufgeloester Listen-Empfaenger: entweder eine Person aus dem Adressbuch
- * (mit `mitglied_id`) oder eine reine Einzeladresse aus `extra_recipients`
- * (`mitglied_id: null`).
- */
 export type ListRecipient = {
 	email: string
 	mitglied_id: string | null
@@ -138,7 +103,6 @@ export const getMailingList = (
 		)
 		.get(normalizeEmail(address))
 
-/** Wirft, wenn ein referenzierter Group-Key nicht in `groups` existiert. */
 const assertGroupExists = (key: string, db: Database): void => {
 	if (!getGroup(key, db)) {
 		throw new Error(
@@ -147,12 +111,6 @@ const assertGroupExists = (key: string, db: Database): void => {
 	}
 }
 
-/**
- * Legt eine Liste an oder aktualisiert sie. Validiert alle recipient_groups
- * und poster_groups gegen die `groups`-Whitelist, bevor etwas geschrieben
- * wird. Mindestens eine recipient_group ODER eine extra_recipients-Adresse
- * muss gesetzt sein — sonst haette die Liste nie Empfaenger.
- */
 export const upsertMailingList = (
 	input: MailingListInput,
 	db: Database = openDb(),
@@ -161,8 +119,6 @@ export const upsertMailingList = (
 	const recipientGroups = [...new Set(input.recipient_groups ?? [])]
 	const posterGroups = [...new Set(input.poster_groups ?? [])]
 	const extraRecipients = dedupeEmails(input.extra_recipients ?? [])
-	// Muster werden VOR dem Schreiben geprueft: ein Tippfehler soll beim
-	// Speichern auffallen, nicht erst, wenn eine Mail unerwartet abprallt.
 	const senderPatterns = [
 		...new Set((input.sender_patterns ?? []).map(normalizeSenderPattern)),
 	]
@@ -212,7 +168,6 @@ export const upsertMailingList = (
 		label: input.label,
 		recipient_groups: JSON.stringify(recipientGroups),
 		poster_groups: JSON.stringify(posterGroups),
-		// Vorgabe fuer NEUE Listen ist 'offen' (Entscheidung des Betreibers).
 		poster_policy: input.poster_policy ?? 'offen',
 		sender_patterns: JSON.stringify(senderPatterns),
 		extra_recipients: JSON.stringify(extraRecipients),
@@ -239,19 +194,6 @@ export const deleteMailingList = (
 		.prepare<[string]>('DELETE FROM mailing_lists WHERE address = ?')
 		.run(normalizeEmail(address)).changes > 0
 
-/**
- * Die NAMENTLICH bekannten erlaubten Absender-Adressen einer Liste
- * (lowercased): E-Mail-Adressen aller Personen ALLER `poster_groups`
- * (EFFEKTIV, also inkl. Untergruppen) vereinigt mit den vollen Adressen aus
- * `sender_patterns`. Ist `broadcast` gesetzt (offene Diskussionsliste),
- * duerfen zusaetzlich ALLE aufgeloesten Empfaenger posten.
- *
- * ACHTUNG, das ist bewusst NICHT die ganze Wahrheit: Domain-Platzhalter
- * (`*@domain`) lassen sich nicht aufzaehlen, und bei
- * `poster_policy = 'offen'` darf ohnehin jeder. Wer wissen will, ob eine
- * konkrete Adresse senden darf, fragt `isSenderAllowed` — diese Menge ist
- * fuer Anzeige und Abschaetzung ("wie viele sind es ungefaehr").
- */
 export const resolveAllowedSenders = (
 	list: MailingListRow,
 	db: Database = openDb(),
@@ -259,9 +201,6 @@ export const resolveAllowedSenders = (
 	const allowed = new Set<string>(
 		listSenderPatterns(list).filter((p) => !isDomainPattern(p)),
 	)
-	// Auch die Absender-Gruppen werden effektiv aufgeloest — sonst duerfte die
-	// Untergruppe einer berechtigten Obergruppe ueberraschenderweise nicht
-	// posten.
 	const groups = expandToSubtrees(listPosterGroups(list), db)
 	if (groups.length > 0) {
 		const placeholders = groups.map(() => '?').join(', ')
@@ -285,12 +224,6 @@ export const resolveAllowedSenders = (
 	return allowed
 }
 
-/**
- * Darf `fromEmail` in diese Liste posten?
- *
- * Geprueft wird immer die ENVELOPE-Adresse (siehe src/lib/lists/incoming.ts),
- * nicht der `From:`-Header — nur der Envelope laeuft gegen SPF.
- */
 export const isSenderAllowed = (
 	list: MailingListRow,
 	fromEmail: string,
@@ -305,12 +238,6 @@ export const isSenderAllowed = (
 		.some((pattern) => matchesSenderPattern(email, pattern))
 }
 
-/**
- * Setzt Richtlinie und Muster einer bestehenden Liste — das, was ein Admin in
- * `/verwaltung` aendern kann, ohne die uebrigen Felder anfassen zu muessen.
- * Wirft bei unbekannter Liste oder ungueltigem Muster, BEVOR etwas
- * geschrieben wird.
- */
 export const setListPosterRules = (
 	address: string,
 	policy: PosterPolicy,
@@ -330,35 +257,6 @@ export const setListPosterRules = (
 	return row
 }
 
-/**
- * Die tatsaechlichen Empfaenger einer Liste:
- *   Personen ALLER `recipient_groups` (EFFEKTIV, inkl. Untergruppen) mit
- *   E-Mail-Adresse
- *   MINUS alle, die fuer diese Liste oder global (`*`) einen Opt-out haben
- *         (`list_suppressions`, personengebunden)
- *   PLUS  die `extra_recipients`-Einzeladressen
- *   MINUS alle Adressen, die fuer diese Liste oder global gesperrt sind
- *         (`address_suppressions` — Bounces, Beschwerden, adressgebundene
- *         Opt-outs; greift auch fuer Adressen ohne Adressbuch-Eintrag)
- * Ueber alle Quellen hinweg nach E-Mail-Adresse dedupliziert.
- */
-/**
- * Sicherheitsventil fuer die Erprobung: Wenn `LIST_RECIPIENT_ALLOWLIST`
- * gesetzt ist, bekommt NUR Post, wessen Adresse darin steht (kommagetrennt,
- * Vergleich case-insensitiv; ein fuehrendes `@domain` erlaubt eine ganze
- * Domain).
- *
- * Warum es das gibt: Seit die Empfaenger aus den ZITADEL-Grants abgeleitet
- * werden, stehen dort echte Elternadressen — 55 in dieser Klasse. Ein
- * versehentlicher Versand waehrend der Erprobung waere nicht
- * zurueckzuholen, und die Eltern wissen von ihren Konten noch nichts. Die
- * Liste zu deaktivieren schuetzt nur, solange niemand sie aktiviert; diese
- * Schranke greift unabhaengig davon.
- *
- * Ist die Variable NICHT gesetzt, gilt sie nicht — der Normalbetrieb
- * verteilt an alle. Sie zu entfernen ist damit der bewusste Schritt in den
- * Echtbetrieb, und er steht an einer Stelle im Deployment.
- */
 const allowlist = (): string[] =>
 	(process.env.LIST_RECIPIENT_ALLOWLIST ?? '')
 		.split(',')
@@ -382,8 +280,6 @@ export const resolveListRecipients = (
 		const placeholders = groups.map(() => '?').join(', ')
 		const rows = db
 			.prepare<string[], MitgliedRow>(
-				// Spalten aufgezaehlt statt `m.*`: `zitadel_user_id` ist intern
-				// und darf nirgends nebenbei mitkommen (siehe members.ts).
 				`SELECT DISTINCT m.id, m.first_name, m.last_name, m.email,
                 m.created_at, m.updated_at
            FROM mitglieder m
@@ -416,8 +312,6 @@ export const resolveListRecipients = (
 		}
 	}
 
-	// Adressgebundene Sperren zum Schluss anwenden: sie gelten unabhaengig
-	// davon, ob die Adresse aus einer Gruppe oder aus extra_recipients kam.
 	const blocked = new Set(
 		db
 			.prepare<[string], { email: string }>(

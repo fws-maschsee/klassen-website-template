@@ -6,8 +6,13 @@ erzeugten Instanz.
 
 ## Sprache
 
-Deutsch - in Kommentaren, Commit-Nachrichten und Antworten. Die erzeugten
+Deutsch - in Commit-Nachrichten, Dokumentation und Antworten. Die erzeugten
 Repositories werden von Eltern gelesen.
+
+## Minimal comments policy
+
+Keine Kommentare. Guter Code, sprechende Namen und Tests erklären sich selbst.
+Erlaubt ist nur, was muss: Werkzeug-Direktiven (biome-ignore, @ts-expect-error, Shebang …) und höchstens eine Zeile für ein Warum, das kein Name ausdrücken kann. Keine Docstrings, keine Begründungsabsätze, kein auskommentierter Code.
 
 ## Was hier wo liegt
 
@@ -33,12 +38,8 @@ cd /tmp/instanz && npm ci && npm run build
 ```
 
 **Vorschreiben, nicht anbieten.** Die Vorlage trifft die Entscheidung. Wo eine
-Alternative erwähnenswert ist, kommt ein kurzer Absatz "Warum nicht X" mit
-Begründung - keine zwei gleichwertigen Wege.
-
-**Begründungen gehören neben den Wert, nicht in ein separates Dokument.** Wer
-`AUTH_GROUP` ändert, liest `src/site.config.ts`, nicht die README. Deshalb steht
-die Warnung dort.
+Alternative erwähnenswert ist, kommt in die Dokumentation ein kurzer Absatz
+"Warum nicht X" - keine zwei gleichwertigen Wege.
 
 **Neue Frage in `copier.yml` = neue Zeile in `tests/answers-ci.yml`.** Sonst
 fällt sie in der CI auf die Vorgabe zurück und wird nie geprüft.
@@ -55,15 +56,15 @@ angefasst.
 Es ist **öffentlich**. Deshalb, ohne Ausnahme:
 
 - **Keine echten Personendaten.** Nicht in `template/src/content/`, nicht in
-  Beispieldaten, nicht in Migrationen, nicht in Test-Fixtures, nicht in
-  Kommentaren. Erfundene Namen und `example.org`-Adressen (RFC 2606).
+  Beispieldaten, nicht in Migrationen, nicht in Test-Fixtures. Erfundene Namen
+  und `example.org`-Adressen (RFC 2606).
 - **Keine Secrets.** Die SealedSecrets unter
   `template/deploy/overlays/production/` sind **Gerüste** mit dem Platzhalter
   `PLATZHALTER-MIT-KUBESEAL-ERSETZEN`; die CI prüft, dass das so bleibt. Ein
   SealedSecret ist ohnehin für genau einen Namespace und Cluster
   verschlüsselt - das Chiffrat einer Klasse ist anderswo wertlos.
-- **Keine Namen realer Klassen** als Beispielwerte. In Tests und Kommentaren
-  stehen `klasse-musterfrau` und `klasse-nachbar`.
+- **Keine Namen realer Klassen** als Beispielwerte. In Tests stehen
+  `klasse-musterfrau` und `klasse-nachbar`.
 
 ## Was hier NICHT abgebildet wird
 

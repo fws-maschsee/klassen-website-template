@@ -7,23 +7,6 @@ import {
 	test,
 } from './fixtures'
 
-/**
- * Dieselben Regeln am MCP-Endpunkt.
- *
- * Der Grund, dass es diese Datei ueberhaupt gibt: `/mcp` ist ein zweiter Weg
- * an dieselben Daten. Waere er nur schwaecher geprueft als ein Klick in der
- * Oberflaeche, waere die ganze Absicherung mit drei Zeilen zu umgehen — man
- * verbindet einen MCP-Client und aendert, was man ueber die Seite nicht
- * duerfte.
- *
- * Der Weg zum Token ist hier absichtlich der echte: dynamische Registrierung,
- * Authorization Code mit PKCE, Zustimmung im Browser. Genau auf diesem Weg
- * ist heute der zweite Fehler entstanden — das frisch ausgestellte Token trug
- * die Rollen der bestehenden Sitzung der Website statt der, die in ZITADEL
- * standen.
- */
-
-/** Ein Schreibzugriff ueber MCP: derselbe, den ein Klick in der Verwaltung tut. */
 const schreibeUeberMcp = (
 	request: import('@playwright/test').APIRequestContext,
 	stack: import('./fixtures').Stack,
@@ -45,7 +28,6 @@ test.describe('MCP-Endpunkt', () => {
 			data: { jsonrpc: '2.0', id: 1, method: 'tools/list' },
 		})
 		expect(response.status()).toBe(401)
-		// Damit ein Client weiss, wo er sich ein Token holt.
 		expect(response.headers()['www-authenticate']).toBeTruthy()
 	})
 
@@ -64,12 +46,6 @@ test.describe('MCP-Endpunkt', () => {
 		request,
 		stack,
 	}) => {
-		// Bewusst getrennt von der Pruefung darueber. DASS abgewiesen wird, ist
-		// die Sicherheitsaussage; WOMIT, entscheidet, ob ein Client sich davon
-		// erholen kann: auf 401 holt er sich ein neues Token, auf 500 haelt er
-		// den Server fuer kaputt und versucht es wieder und wieder. Zwei
-		// getrennte Tests, damit ein Fehlschlag hier nicht die wichtigere
-		// Aussage verdeckt.
 		const result = await schreibeUeberMcp(
 			request,
 			stack,
@@ -107,8 +83,6 @@ test.describe('MCP-Endpunkt', () => {
 			'McpMitgliedDarfNicht',
 		)
 		expect(result.isError, result.text).toBe(true)
-		// Der Text soll sagen, WAS fehlt und WER es geben kann — sonst sucht der
-		// Mensch davor den Fehler im Server statt in seiner Berechtigung.
 		expect(result.text).toContain('admin')
 	})
 
@@ -118,10 +92,6 @@ test.describe('MCP-Endpunkt', () => {
 	}) => {
 		await signIn(page, stack, stack.users.fremd)
 
-		// Die Zustimmungsseite liegt hinter derselben Pruefung wie die uebrige
-		// Seite. Wer hier nicht hereinkommt, kann auch keinen MCP-Zugang
-		// erteilen — sonst waere der Endpunkt der Weg an der Klassentrennung
-		// vorbei.
 		const registrierung = await page.request.post(
 			`${stack.appOrigin}/register`,
 			{
@@ -158,14 +128,6 @@ test.describe('MCP-Endpunkt', () => {
 		)
 	})
 
-	/**
-	 * Der Fall des Betreibers, am MCP-Endpunkt.
-	 *
-	 * Bisher wanderten die Rollen beim Zustimmen in den Authorization Code und
-	 * von dort in die Tokens. Ein Token war damit eine Momentaufnahme, die nie
-	 * wieder abgeglichen wurde — ein entzogenes Recht wirkte nicht, und der
-	 * automatische Refresh reichte die alte Momentaufnahme weiter.
-	 */
 	test('Rechteentzug wirkt fuer ein bereits ausgestelltes Token', async ({
 		page,
 		request,
@@ -190,7 +152,6 @@ test.describe('MCP-Endpunkt', () => {
 		await zitadel.setGrantRoles(user, ['mitglied'])
 		await erwarteRollen(zitadel, user, ['mitglied'])
 
-		// DASSELBE Token, kein neuer Anmeldevorgang, keine neue Zustimmung.
 		await expect
 			.poll(
 				async () =>
@@ -257,13 +218,6 @@ test.describe('MCP-Endpunkt', () => {
 			.toBe(false)
 	})
 
-	/**
-	 * Der dritte Fehler von heute: widerrufene Zugriffe blieben in der
-	 * Oberflaeche stehen, obwohl die Tokens korrekt widerrufen waren. Wer das
-	 * sieht, glaubt, der Widerruf habe nicht gewirkt, und widerruft noch
-	 * einmal — oder, schlimmer, glaubt umgekehrt einem Eintrag, den es nicht
-	 * mehr gibt.
-	 */
 	test('„Zugriff beenden" entwertet das Token und raeumt die Anzeige', async ({
 		page,
 		request,
@@ -287,20 +241,10 @@ test.describe('MCP-Endpunkt', () => {
 			zeile,
 			'die verbundene Anwendung steht in der Verwaltung',
 		).toBeVisible()
-		// Die Oberflaeche fragt vor dem Widerruf zurueck (`window.confirm`).
-		// Playwright weist Dialoge sonst stillschweigend ab — der Klick liefe
-		// dann ins Leere und der Test schluege mit „Token lebt noch" fehl, was
-		// nach einem Fehler im Widerruf aussaehe und keiner waere. Der Handler
-		// stoert nicht, falls die Rueckfrage einmal wegfaellt.
 		page.on('dialog', (dialog) => dialog.accept())
 		await zeile.getByRole('button', { name: 'Zugriff beenden' }).click()
-		// Das Formular schickt ab und die Seite laedt neu; erst danach ist der
-		// Widerruf wirklich durch.
 		await page.waitForLoadState('networkidle')
 
-		// Erstens: das Token ist wirklich tot. Ob die Absage dabei das richtige
-		// 401 traegt, prueft weiter oben ein eigener Test — hier zaehlt nur,
-		// dass der Zugriff nicht mehr durchgeht.
 		const nachher = await schreibeUeberMcp(
 			request,
 			stack,
@@ -309,7 +253,6 @@ test.describe('MCP-Endpunkt', () => {
 		)
 		expect(nachher.status, nachher.text).toBeGreaterThanOrEqual(400)
 
-		// Zweitens: die Oberflaeche sagt dasselbe. Kein aktiver Zugriff mehr.
 		await page.goto('/verwaltung')
 		const danach = page.locator('tr', { hasText: token.clientId })
 		if (await danach.count()) {
@@ -321,7 +264,6 @@ test.describe('MCP-Endpunkt', () => {
 	})
 })
 
-/** Siehe website.spec.ts — ZITADEL ist ereignisbasiert und liest verzoegert. */
 const erwarteRollen = async (
 	zitadel: { rolesOf: (user: StackUser) => Promise<string[]> },
 	user: StackUser,

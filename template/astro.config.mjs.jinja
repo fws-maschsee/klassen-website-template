@@ -9,8 +9,6 @@ import shipyardBlog from '@levino/shipyard-blog'
 import shipyardDocs from '@levino/shipyard-docs'
 import { defineConfig } from 'astro/config'
 import { remarkAdmonitionLabels } from './plugins/remark-admonition-labels.mjs'
-// Klassenname, Domain und Repo stehen zentral in src/site.config.ts.
-// Beim Wechsel der Klassenlehrkraft nur dort CLASS_NAME ändern.
 {% if plausible_script_url %}
 import {
 	ANALYTICS_SCRIPT_URL,
@@ -25,29 +23,12 @@ import { CLASS_NAME, REPO_URL, SITE_URL } from './src/site.config'
 
 export default defineConfig({
 	site: SITE_URL,
-	// SSR, nicht statisch: Die Inhalte sind nur für die Eltern der Klasse
-	// bestimmt, und die Auth-Middleware muss jede Anfrage sehen. Ein statischer
-	// Build würde alle Berichte und Protokolle als öffentliche HTML-Dateien
-	// ausliefern.
 	output: 'server',
-	// `middleware` statt `standalone`: Der Astro-Server läuft nicht allein,
-	// sondern wird von `server.ts` in Express eingehängt. Nur so lassen sich der
-	// MCP-Endpunkt und die OAuth-Routen daneben betreiben (siehe server.ts).
-	// Gestartet wird die Anwendung dadurch mit `npm start`, nicht mit
-	// `node dist/server/entry.mjs`.
 	adapter: node({
 		mode: 'middleware',
 	}),
-	// Astro blockt Same-Origin-POSTs standardmäßig über einen Origin-Check. Da
-	// Express vor Astro sitzt, greift der Check bei der Consent-Seite nicht
-	// zuverlässig. Eigene Verteidigung: `pending_id` ist ein nicht erratbares
-	// Zufallstoken, und der OAuth-Flow ist ohnehin durch PKCE plus die Prüfung
-	// der redirect_uri abgesichert.
 	security: { checkOrigin: false },
 	markdown: {
-		// Admonitions im Docusaurus-Stil (:::note, :::tip, :::info, :::warning,
-		// :::danger). Die Reihenfolge ist bindend: remarkAdmonitionLabels muss
-		// zwischen remarkDirective und remarkAdmonitions laufen.
 		remarkPlugins: [remarkDirective, remarkAdmonitionLabels, remarkAdmonitions],
 	},
 	integrations: [
@@ -71,8 +52,6 @@ export default defineConfig({
 				{
 					src: ANALYTICS_SCRIPT_URL,
 					defer: true,
-					// Muss der Domain entsprechen, unter der die Seite in Plausible
-					// angelegt ist - nicht am Klassennamen ausrichten.
 					'data-domain': SITE_DOMAIN,
 				},
 			],

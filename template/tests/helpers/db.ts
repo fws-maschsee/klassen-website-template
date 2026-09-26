@@ -4,15 +4,6 @@ import Database, { type Database as DatabaseType } from 'better-sqlite3'
 
 const MIGRATIONS_DIR = path.join(process.cwd(), 'db', 'migrations')
 
-/**
- * Frische In-Memory-Datenbank mit dem echten Schema: alle Migrations werden in
- * Dateinamen-Reihenfolge eingespielt. Damit testen wir gegen dasselbe Schema,
- * das auch produktiv laeuft, statt gegen eine Handschrift-Kopie.
- *
- * DATENSCHUTZ: Tests befuellen diese DB ausschliesslich mit erfundenen Namen
- * und `example.org`-Adressen. Echte Elterndaten haben im Repository nichts zu
- * suchen — auch nicht als Fixture.
- */
 export const createTestDb = (): DatabaseType => {
 	const db = new Database(':memory:')
 	db.pragma('foreign_keys = ON')
@@ -34,11 +25,6 @@ export const createTestDb = (): DatabaseType => {
 	return db
 }
 
-/**
- * Schneidet den `-- migrate:up`-Abschnitt heraus. Ab dem ENDE der Markerzeile,
- * damit dbmate-Direktiven hinter dem Marker (z.B.
- * `-- migrate:up transaction:false`) nicht als SQL auftauchen.
- */
 const extractUpSection = (content: string): string | undefined => {
 	const start = content.indexOf('-- migrate:up')
 	if (start === -1) return undefined

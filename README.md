@@ -39,8 +39,8 @@ ausführlich in `deploy/README.md` der erzeugten Instanz:
 2. **Die Secrets erzeugen.** Die beiden SealedSecrets unter
    `deploy/overlays/production/` kommen als **Gerüst** mit Platzhaltern - ein
    SealedSecret ist für genau einen Namespace und Cluster verschlüsselt und
-   lässt sich nicht mitliefern. Die `kubeseal`-Kommandos stehen als Kommentar
-   in den Dateien.
+   lässt sich nicht mitliefern. Die `kubeseal`-Kommandos stehen in
+   `deploy/README.md`.
 3. **DNS** auf den Cluster zeigen lassen (bei Wildcard-Eintrag: nichts zu tun).
 4. **Argo-CD-`Application` im GitOps-Repository anlegen**, die auf den Branch
    `production` dieses neuen Repositories zeigt. Die Manifeste selbst bleiben
@@ -183,8 +183,8 @@ Produktionsantwort.
 An Waldorfschulen wechselt die Klassenlehrkraft. Bei der ersten migrierten
 Klasse steckte der Name in 19 Dateien. Die Vorlage legt `src/site.config.ts`
 an, das Klassenname, Schulname, Domain, Repo-URL, Auth-Gruppe und Kalenderpfad
-bündelt - jeder Wert mit der Begründung, ob er beim Wechsel mitwandert oder
-nicht.
+bündelt. Welcher Wert beim Wechsel mitwandert, steht in der `CLAUDE.md` der
+Klasse.
 
 ### 6. Der Kalender-Dateiname wandert nie mit
 

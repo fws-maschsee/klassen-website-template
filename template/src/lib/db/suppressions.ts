@@ -7,28 +7,6 @@ import type {
 	SuppressionSource,
 } from './types.js'
 
-/**
- * Suppressions — "wer bekommt KEINE Mail".
- *
- * Zwei Ebenen, weil zwei verschiedene Fragen beantwortet werden:
- *
- *   PERSON  (`list_suppressions`): "Frau X will keine Listenmails."
- *           Bleibt an der Person haengen, auch wenn sie ihre Adresse wechselt.
- *           Wird von Hand gepflegt (MCP-Tool).
- *
- *   ADRESSE (`address_suppressions`): "an diese Adresse darf nicht mehr
- *           zugestellt werden." Das ist die Ebene, auf der Bounces und
- *           Beschwerden ankommen — SES meldet nur eine Adresse, und die kann
- *           zu gar keinem Adressbuch-Eintrag gehoeren (`extra_recipients`).
- *           Ohne diese Ebene sammelt die Liste tote Adressen und SES stuft die
- *           Absenderreputation der Domain herab.
- *
- * `list_address = '*'` ist in beiden Tabellen die Wildcard "gilt fuer alle
- * Listen". Bounces werden immer global eingetragen: eine unzustellbare
- * Adresse ist auf jeder Liste unzustellbar.
- */
-
-/** Wildcard-Adresse fuer den globalen Opt-out ("keine Verteiler-Mails"). */
 export const GLOBAL_SUPPRESSION = '*'
 
 const normalizeListAddress = (listAddress: string): string =>
@@ -36,15 +14,6 @@ const normalizeListAddress = (listAddress: string): string =>
 		? GLOBAL_SUPPRESSION
 		: normalizeEmail(listAddress)
 
-// ---------------------------------------------------------------------------
-// Personengebunden
-// ---------------------------------------------------------------------------
-
-/**
- * Traegt einen Opt-out fuer eine Person ein (idempotent). Die Person bleibt in
- * ihrer Gruppe (Klassenliste, Telefonkette), bekommt aber keine Mail dieser
- * Liste mehr.
- */
 export const suppressListRecipient = (
 	mitgliedId: string,
 	listAddress: string,
@@ -69,7 +38,6 @@ export const suppressListRecipient = (
 	return listSuppressionsForMitglied(mitgliedId, db)
 }
 
-/** Entfernt einen personengebundenen Opt-out wieder. */
 export const unsuppressListRecipient = (
 	mitgliedId: string,
 	listAddress: string,
@@ -91,7 +59,6 @@ export const listSuppressionsForMitglied = (
 		)
 		.all(mitgliedId)
 
-/** Alle personengebundenen Opt-outs einer Liste. */
 export const listSuppressionsForAddress = (
 	listAddress: string,
 	db: Database = openDb(),
@@ -102,33 +69,15 @@ export const listSuppressionsForAddress = (
 		)
 		.all(normalizeListAddress(listAddress))
 
-// ---------------------------------------------------------------------------
-// Adressgebunden (Bounces, Beschwerden, Adressen ohne Adressbuch-Eintrag)
-// ---------------------------------------------------------------------------
-
 export type SuppressAddressInput = {
 	email: string
-	/** Listen-localpart oder `*` (Default) fuer "alle Listen". */
 	list_address?: string
 	source?: SuppressionSource
 	reason?: string | null
-	/** SES-Rohwert `Permanent` | `Transient` | `Undetermined`. */
 	bounce_type?: string | null
-	/** SES-Rohwert `General` | `NoEmail` | `Suppressed` | ... */
 	bounce_subtype?: string | null
 }
 
-/**
- * Sperrt eine E-Mail-Adresse (idempotent). Bei wiederholter Meldung derselben
- * Adresse wird `event_count` hochgezaehlt und `last_event_at` aktualisiert,
- * statt eine zweite Zeile anzulegen — so bleibt sichtbar, wie oft eine Adresse
- * bereits geprellt hat.
- *
- * Das ist die Funktion, die ein spaeterer SES/SNS-Webhook aufruft. Die
- * Datenstruktur und dieser Schreibpfad sind fertig; die automatische
- * Befuellung fehlt noch, weil die IAM-Zugangsdaten fuer das SNS-Abo nicht
- * vorliegen (siehe README/PR).
- */
 export const suppressAddress = (
 	input: SuppressAddressInput,
 	db: Database = openDb(),
@@ -184,7 +133,6 @@ export const getAddressSuppression = (
 		)
 		.get(normalizeEmail(email), normalizeListAddress(listAddress))
 
-/** Hebt eine Adress-Sperre auf. */
 export const unsuppressAddress = (
 	email: string,
 	listAddress: string = GLOBAL_SUPPRESSION,
@@ -196,7 +144,6 @@ export const unsuppressAddress = (
 		)
 		.run(normalizeEmail(email), normalizeListAddress(listAddress)).changes > 0
 
-/** Alle Adress-Sperren, optional auf eine Liste eingegrenzt. */
 export const listAddressSuppressions = (
 	listAddress?: string,
 	db: Database = openDb(),
@@ -213,11 +160,6 @@ export const listAddressSuppressions = (
 				)
 				.all(normalizeListAddress(listAddress))
 
-/**
- * Ist diese Adresse fuer die angegebene Liste (oder global) gesperrt? Wird vom
- * Rundmail-Pfad benutzt, der keine Listenadresse kennt und deshalb nur die
- * globalen Sperren beruecksichtigt.
- */
 export const isAddressSuppressed = (
 	email: string,
 	listAddress: string = GLOBAL_SUPPRESSION,
@@ -229,7 +171,6 @@ export const isAddressSuppressed = (
 		)
 		.get(normalizeEmail(email), normalizeListAddress(listAddress)) !== undefined
 
-/** Alle global gesperrten Adressen (lowercased) als Set. */
 export const globallySuppressedAddresses = (
 	db: Database = openDb(),
 ): Set<string> =>

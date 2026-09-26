@@ -32,27 +32,6 @@ import { publicBaseUrl } from '../../server/config.js'
 
 export const prerender = false
 
-/**
- * Verwaltung der Klasse: Verteiler, Gruppen, Adressbuch und die Verbindung
- * zum MCP-Server.
- *
- * Wer hierher kommt, ist angemeldet — die Middleware laesst sonst niemanden
- * durch. Was er hier SIEHT und DARF, entscheidet `src/server/auth/roles.ts`,
- * dieselbe Datei, die der MCP-Server fuer jedes Werkzeug fragt. Ein Klick
- * hier und ein `upsert_mitglied` ueber MCP laufen durch dieselbe Pruefung,
- * nicht durch zwei aehnliche.
- *
- * Die Trennung ist bewusst nicht "alles oder nichts":
- *
- *   Jedes Mitglied sieht, WELCHE Verteiler es gibt und WELCHE GRUPPEN sie
- *   erreichen. Das ist die Frage, die man vor dem Absenden beantwortet haben
- *   will — schreibe ich gerade an alle Eltern oder auch ans Kollegium? Sie
- *   zu beantworten braucht keine einzige fremde Adresse.
- *
- *   WER in einer Liste steht, ist dagegen personenbezogen und geht die
- *   uebrigen Familien nichts an. Das Adressbuch sieht nur `admin`.
- */
-
 const roles = Astro.locals.user?.roles ?? []
 const mayEdit = canEdit(roles)
 const maySeePersons = canSeePersonalData(roles)
@@ -65,9 +44,6 @@ if (Astro.request.method === 'POST') {
   const action = String(form.get('action') ?? '')
   const text = (name: string): string => String(form.get(name) ?? '').trim()
 
-  // Zugriff einer verbundenen Anwendung beenden: das darf jeder fuer SEINE
-  // eigenen Verbindungen — es ist der Widerruf einer Vollmacht, die er selbst
-  // erteilt hat, und keine Verwaltung fremder Daten.
   if (action === 'revoke') {
     const clientId = text('client_id')
     const { access, refresh } = revokeAllTokensForClientAndUser(
@@ -79,7 +55,6 @@ if (Astro.request.method === 'POST') {
       text: `Zugriff beendet: ${access} Zugriffs- und ${refresh} Erneuerungs-Token widerrufen. Die Anwendung muss sich neu autorisieren.`,
     }
   } else if (!mayEdit) {
-    // Nicht nur die Formulare ausblenden: ein POST kommt auch ohne sie an.
     return new Response(deniedMessage('bearbeiten'), {
       status: 403,
       headers: { 'Content-Type': 'text/plain; charset=utf-8' },
@@ -99,8 +74,6 @@ if (Astro.request.method === 'POST') {
           text: `Gespeichert: ${row.first_name} ${row.last_name} (${row.id})`,
         }
       } else if (action === 'poster_rules') {
-        // Muster stehen im Formular zeilenweise — das ist die Schreibweise,
-        // die man ohne Erklaerung richtig macht. Leerzeilen fliegen raus.
         const patterns = text('sender_patterns')
           .split(/\r?\n/)
           .map((line) => line.trim())
@@ -127,7 +100,6 @@ if (Astro.request.method === 'POST') {
   }
 }
 
-// Personenbezogenes wird gar nicht erst geladen, wenn es niemand sehen darf.
 const mitglieder = maySeePersons
   ? listMitglieder().map((row) => ({ ...row, groups: getMitgliedGroups(row.id) }))
   : []
@@ -163,7 +135,6 @@ const editingList = listId ? lists.find((l) => l.address === listId) : undefined
       </p>
     )}
 
-    {/* ---------------------------------------------------------------- */}
     <h2 class="text-xl font-bold mt-8 mb-3">Mailinglisten ({lists.length})</h2>
     <p class="mb-3">
       Eine Mail an eine dieser Adressen erreicht alle Personen der genannten
@@ -274,7 +245,6 @@ const editingList = listId ? lists.find((l) => l.address === listId) : undefined
       </>
     )}
 
-    {/* ---------------------------------------------------------------- */}
     <h2 class="text-xl font-bold mt-8 mb-3">Gruppen ({groups.length})</h2>
     <p class="mb-3">
       Gruppen sind das, worauf Verteiler zeigen. „Effektiv" zählt die
@@ -307,7 +277,6 @@ const editingList = listId ? lists.find((l) => l.address === listId) : undefined
       </table>
     </div>
 
-    {/* ---------------------------------------------------------------- */}
     <h2 class="text-xl font-bold mt-8 mb-3">Mit Claude verbinden (MCP)</h2>
     <p class="mb-3">
       Diese Instanz bietet ihre Verwaltung zusätzlich als <strong>MCP-Server</strong>
@@ -370,7 +339,6 @@ const editingList = listId ? lists.find((l) => l.address === listId) : undefined
       Deine. Andere Zugänge bleiben unberührt.
     </p>
 
-    {/* ---------------------------------------------------------------- */}
     {maySeePersons ? (
       <>
         <h2 class="text-xl font-bold mt-8 mb-3">Adressbuch ({mitglieder.length})</h2>
@@ -466,13 +434,6 @@ const editingList = listId ? lists.find((l) => l.address === listId) : undefined
 </Layout>
 
 <script>
-  // Kopieren ohne Framework. Faellt der Clipboard-Zugriff aus (aelterer
-  // Browser, kein sicherer Kontext), bleibt das Feld markierbar — die URL
-  // steht ja lesbar da.
-  // Rueckfrage vor zerstoerenden Aktionen. Bewusst am Formular und nicht am
-  // Knopf: so greift sie auch bei Absenden per Tastatur. Ohne JavaScript
-  // bleibt die Aktion funktionsfaehig, dann eben ohne Rueckfrage — die
-  // Berechtigungspruefung liegt ohnehin auf dem Server.
   document.querySelectorAll('form[data-confirm]').forEach((form) => {
     form.addEventListener('submit', (event) => {
       const frage = form.getAttribute('data-confirm') ?? 'Wirklich fortfahren?'

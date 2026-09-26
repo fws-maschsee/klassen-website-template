@@ -1,5 +1,3 @@
-# Copier-Antworten für die in der CI erzeugte Instanz.
-# Nur Dokumentationswerte (RFC 2606) - niemals eine echte Klasse.
 class_display_name: Klasse Musterfrau
 class_slug: musterfrau
 school_name: Freie Waldorfschule Musterstadt

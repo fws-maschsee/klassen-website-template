@@ -19,8 +19,6 @@ import {
 } from '../../src/lib/db/suppressions.js'
 import { createTestDb } from '../helpers/db.js'
 
-/** Alle Namen und Adressen sind frei erfunden. */
-
 let db: Database
 
 const person = (
@@ -257,14 +255,6 @@ describe('Absenderberechtigung', () => {
 })
 
 describe('Migration auf poster_policy', () => {
-	/**
-	 * Der wichtigste Test dieser Datei: Die Migration darf das Verhalten der
-	 * BEIDEN LAUFENDEN Klassen nicht anfassen. Eine Liste, die es vor der
-	 * Migration schon gab, muss danach genauso streng sein wie vorher — offen
-	 * wird nur, was jemand ausdruecklich umstellt. Simuliert wird der Bestand,
-	 * indem die Zeile am ORM vorbei so geschrieben wird, wie die alte
-	 * Anwendung sie geschrieben haette (ohne poster_policy).
-	 */
 	test('eine Liste aus der Zeit davor bleibt eingeschraenkt', () => {
 		person('anna', 'anna@example.org')
 		person('vertreterin', 'vertreterin@example.org', [
@@ -319,7 +309,6 @@ describe('poster_policy', () => {
 	test('offen laesst auch voellig Fremde schreiben', () => {
 		const list = liste('offen')
 		expect(isSenderAllowed(list, 'wildfremd@irgendwo.example', db)).toBe(true)
-		// Auch ohne jede Poster-Gruppe und ohne jedes Muster.
 		expect(resolveAllowedSenders(list, db).size).toBe(0)
 	})
 
@@ -350,9 +339,6 @@ describe('poster_policy', () => {
 	})
 
 	test('*@domain trifft NICHT eine Subdomain davon', () => {
-		// Sonst duerfte, wer irgendeine Subdomain kontrolliert, an alle Familien
-		// schreiben. Das soll ueberraschen, wenn man es erwartet — nicht, wenn
-		// man es nicht erwartet.
 		const list = liste('sub', {
 			poster_policy: 'eingeschraenkt',
 			sender_patterns: ['*@example.org'],

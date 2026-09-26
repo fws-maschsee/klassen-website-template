@@ -1,37 +1,3 @@
-# SES-SMTP-Zugang und das mit dem Cloudflare-Email-Worker geteilte HMAC-Secret.
-#
-# DIESE DATEI IST EIN GERUEST — siehe sealed-mail unten und die ausfuehrliche
-# Begruendung in sealed-oidc.yaml. Die Platzhalter MUESSEN vor dem ersten
-# Deploy durch echte, fuer DIESEN Namespace verschluesselte Werte ersetzt
-# werden.
-#
-# Drei Werte:
-#   SES_SMTP_USER / SES_SMTP_PASSWORD  Versand ueber Amazon SES.
-#     Das sind SES-SMTP-Credentials, NICHT die IAM-Access-Keys — SES leitet
-#     sie aus einem IAM-User ab und sie sehen anders aus. Der Port ist 2587
-#     (Vorgabe in src/lib/email/transport.ts) und das ist Absicht: 25, 465 und
-#     587 waren providerseitig blockiert.
-#   LIST_WEBHOOK_SECRET                Signatur des Listen-Eingangs.
-#     /api/lists/incoming ist oeffentlich erreichbar und haengt allein an
-#     HMAC-SHA256 ueber "<X-List-Timestamp>." + rawBody. DERSELBE Wert muss im
-#     Worker liegen. NICHT mit wrangler setzen und den Worker NIEMALS von Hand
-#     ausrollen — erst einen Build aus `main` ueber die GitHub-Integration
-#     laufen lassen, dann das Secret im Cloudflare-Dashboard eintragen.
-#     Wer den Wert braucht, liest ihn aus dem Cluster:
-#       kubectl -n {{ repo_name }} get secret {{ repo_name }}-mail \
-#         -o jsonpath='{.data.LIST_WEBHOOK_SECRET}' | base64 -d
-#     Bis beide Seiten denselben Wert haben, weist die App eingehende
-#     Listenpost ab — sie faellt geschlossen aus, nicht offen.
-#
-# Erzeugen:
-#
-#   kubectl create secret generic {{ repo_name }}-mail \
-#     --namespace {{ repo_name }} --dry-run=client -o yaml \
-#     --from-literal=SES_SMTP_USER="..." \
-#     --from-literal=SES_SMTP_PASSWORD="..." \
-#     --from-literal=LIST_WEBHOOK_SECRET="$(openssl rand -base64 32)" \
-#   | kubeseal --format yaml --cert sealed-secrets-public-key.pem \
-#   > deploy/overlays/production/sealed-mail.yaml
 apiVersion: bitnami.com/v1alpha1
 kind: SealedSecret
 metadata:

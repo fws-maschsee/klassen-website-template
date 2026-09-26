@@ -13,37 +13,6 @@ type CheckBody = {
 	from?: unknown
 }
 
-/**
- * Vorabpruefung: "Darf dieser Absender an diese Liste senden?"
- *
- * OPTIONAL. Der Worker in `email-worker/` ruft diesen Endpunkt NICHT auf: Er
- * reicht die Mail durch und liest die Berechtigung am HTTP-Status von
- * `/api/lists/incoming` ab (403 -> Ablehnung beim Absender). Der Endpunkt
- * bleibt trotzdem, weil er zwei Dinge kann, die `/incoming` nicht kann:
- *
- *  - die Frage "warum kommt meine Mail nicht durch?" beantworten, ohne dass
- *    jemand eine Mail verschicken muss,
- *  - einen Worker bedienen, der schon beim SMTP-Handshake ablehnen moechte,
- *    bevor er den Nachrichtenrumpf ueberhaupt entgegennimmt.
- *
- * VERTRAG:
- *
- *   POST /api/lists/check
- *   Content-Type: application/json
- *   Body: {"list": "eltern", "from": "jemand@example.org"}
- *   Header:
- *     X-List-Timestamp  Unix-Sekunden
- *     X-List-Signature  hex(HMAC-SHA256(secret, `${timestamp}.${rawBody}`))
- *                       — rawBody ist der JSON-Body, byte-genau wie gesendet
- *
- *   Antworten:
- *     200 {"allowed": true,  "list": "eltern", "label": "...", "recipients": 23}
- *     403 {"allowed": false, "reason": "..."}   -> Worker lehnt die Mail ab
- *     400 fehlende Felder
- *     401 Signatur fehlt/ungueltig
- *
- * Die Antwort nennt bewusst KEINE Empfaengeradressen, nur ihre Anzahl.
- */
 export const POST: APIRoute = async ({ request }) => {
 	const rawBody = Buffer.from(await request.arrayBuffer())
 

@@ -12,14 +12,6 @@ import {
 import { processListBatch } from '../../src/lib/lists/queue.js'
 import { createTestDb } from '../helpers/db.js'
 
-/**
- * Der Weg vom Cloudflare-Worker bis zum SMTP-Aufruf: rohe Mail rein,
- * n Zustellungen raus. Der Vertrag mit dem Worker steht in
- * `email-worker/README.md`.
- *
- * Alle Namen und Adressen sind frei erfunden.
- */
-
 let db: Database
 let sent: SendInput[]
 
@@ -38,22 +30,14 @@ const rawMail = (headers: Record<string, string>, body = 'Inhalt'): Buffer => {
 }
 
 type DeliverOptions = {
-	/** Envelope-Absender (SMTP MAIL FROM). Darauf wird autorisiert. */
 	envelopeFrom?: string
-	/** From:-Header im Body. Frei wählbar, für die Berechtigung irrelevant. */
 	headerFrom?: string
 	messageId?: string
 	subject?: string
 	listName?: string
-	/** Zusätzliche Roh-Header der Mail (List-Id, Auto-Submitted, …). */
 	extraHeaders?: Record<string, string>
 }
 
-/**
- * Stellt eine Mail so zu, wie der Worker es tut: Listenname, Envelope-Absender
- * und Message-ID kommen als Parameter (beim Worker als `X-List-*`-Header),
- * NICHT aus dem Body.
- */
 const deliver = async (options: DeliverOptions = {}) => {
 	const envelopeFrom = options.envelopeFrom ?? 'vera@example.org'
 	const headers: Record<string, string> = {
@@ -132,7 +116,6 @@ describe('Annahme und Verteilung', () => {
 			'vera@example.org',
 		])
 		expect(sent[0]?.subject).toBe('[Eltern] Termin')
-		// From zeigt auf die Liste (DMARC), der Originalabsender bleibt sichtbar.
 		expect(sent[0]?.from).toContain('Vera Beispiel via Eltern')
 		expect(sent[0]?.from).toContain('eltern@')
 		expect(sent[0]?.headers?.['X-Original-From']).toContain('vera@example.org')
@@ -173,9 +156,6 @@ describe('Annahme und Verteilung', () => {
 
 describe('Berechtigung', () => {
 	test('autorisiert wird der Envelope-Absender, nicht der From-Header', async () => {
-		// Unberechtigter Envelope-Absender, der sich im Body als berechtigte
-		// Person ausgibt. Genau der Angriff, gegen den der Worker den
-		// Envelope-Absender getrennt mitschickt.
 		const result = await deliver({
 			envelopeFrom: 'fremd@example.org',
 			headerFrom: 'Vera Beispiel <vera@example.org>',
@@ -237,7 +217,6 @@ describe('Berechtigung', () => {
 	test('Ablehnungsgruende nennen keine Empfaengeradressen', async () => {
 		const result = await deliver({ envelopeFrom: 'anna@example.org' })
 		if (result.kind !== 'rejected') throw new Error('erwartet: rejected')
-		// Der Text geht als Unzustellbarkeitsnachricht an den Absender.
 		expect(result.reason).not.toContain('vera@example.org')
 		expect(result.reason).toContain('eltern')
 	})

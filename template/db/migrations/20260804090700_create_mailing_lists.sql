@@ -1,31 +1,4 @@
 -- migrate:up
--- `mailing_lists` = Mailman-Ersatz. Jede Zeile ist EINE Verteiler-Adresse
--- (`address` ist nur der localpart vor dem @, z.B. 'eltern'; die Domain kommt
--- aus der Env-Variable LIST_DOMAIN). Eine eingehende Mail an
--- <address>@<LIST_DOMAIN> wird 1:1 an die Empfaenger weiterverteilt — aber nur,
--- wenn der Absender posten darf.
---
--- Alles setzt auf den bestehenden Gruppen auf ("alles ist eine Group"):
---   recipient_groups  JSON-Array von Group-Keys: wer bekommt die Mail. Wird
---                     EFFEKTIV aufgeloest (inkl. aller Untergruppen).
---   poster_groups     JSON-Array von Group-Keys: wer darf schreiben.
---   extra_recipients  JSON-Array zusaetzlicher Einzeladressen (Personen ohne
---                     Eintrag im Adressbuch, z.B. das Schulbuero).
---   extra_senders     JSON-Array zusaetzlicher erlaubter Absenderadressen.
--- Gruppen- und Einzeladressen werden bei der Aufloesung ueber die
--- E-Mail-Adresse (lowercase) dedupliziert.
---
--- Die Group-Keys werden bewusst NICHT per FK erzwungen (konsistent mit dem
--- restlichen Code, der Group-Existenz in der App-Schicht prueft): so blockiert
--- eine Liste nicht das Loeschen einer Gruppe, und `upsertMailingList`
--- validiert die Referenzen mit einer verstaendlichen Fehlermeldung.
---
--- reply_mode:
---   'sender' -> Reply-To zeigt auf den Originalabsender (Ankuendigungsliste)
---   'list'   -> Reply-To zeigt auf die Listenadresse (Diskussionsliste)
--- broadcast:
---   0 -> nur poster_groups/extra_senders duerfen senden (Ankuendigung)
---   1 -> zusaetzlich duerfen ALLE Empfaenger senden (offene Diskussion)
 CREATE TABLE mailing_lists (
   address          TEXT PRIMARY KEY,
   label            TEXT NOT NULL,
@@ -49,4 +22,3 @@ BEGIN
 END;
 
 -- migrate:down
--- forward-only, absichtlich leer

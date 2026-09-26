@@ -9,15 +9,6 @@ import {
 	type Page,
 } from '@playwright/test'
 
-/**
- * Gemeinsames Werkzeug der Autorisierungs-Tests.
- *
- * Alles hier spricht mit dem lokalen Stack aus `stack.mjs` — einem echten
- * ZITADEL in einem Container, das mit diesem Testlauf entsteht und mit ihm
- * vergeht. Kein Dienst im Netz, kein Nachbau, keine Zugangsdaten aus dem
- * Betrieb.
- */
-
 const here = dirname(fileURLToPath(import.meta.url))
 const statePath = resolve(here, '.stack/stack.json')
 
@@ -26,7 +17,6 @@ export type StackUser = {
 	userId: string
 	email: string
 	password: string
-	/** ID des User-Grants im eigenen bzw. im Nachbarprojekt. */
 	grantId?: string
 }
 
@@ -34,10 +24,8 @@ export type Stack = {
 	issuer: string
 	loginBaseUri: string
 	appOrigin: string
-	/** PAT des Dienstnutzers DIESER Wegwerf-Instanz. Sonst nichts. */
 	adminToken: string
 	orgId: string
-	/** Der Dienstzugang, mit dem die ANWENDUNG bei ZITADEL nachfragt. */
 	appServiceToken: string
 	ownProjectId: string
 	otherProjectId: string
@@ -57,17 +45,6 @@ export const readStack = (): Stack => {
 	return JSON.parse(readFileSync(statePath, 'utf8'))
 }
 
-// --- ZITADEL-Verwaltung waehrend des Tests ---------------------------------
-
-/**
- * Die Handvoll ZITADEL-Aufrufe, die die Tests selbst brauchen: eine Rolle
- * vergeben, eine entziehen.
- *
- * Sie laufen gegen die lokale Instanz und veraendern deren Zustand — das ist
- * der Punkt. Genau dieser Schritt waere gegen einen produktiven
- * Verzeichnisdienst nicht verantwortbar: ein abgebrochener Lauf liesse dort
- * einen echten Zugang entzogen zurueck.
- */
 export class Zitadel {
 	constructor(
 		private readonly stack: Stack,
@@ -95,7 +72,6 @@ export class Zitadel {
 		return text ? JSON.parse(text) : {}
 	}
 
-	/** Setzt die Rollen eines bestehenden Grants neu. */
 	setGrantRoles(user: StackUser, roles: string[]) {
 		return this.call(
 			'put',
@@ -104,7 +80,6 @@ export class Zitadel {
 		)
 	}
 
-	/** Entzieht den Grant vollstaendig. */
 	removeGrant(user: StackUser) {
 		return this.call(
 			'delete',
@@ -112,17 +87,6 @@ export class Zitadel {
 		)
 	}
 
-	/**
-	 * Liest die Rollen, die ZITADEL fuer diese Person in DIESEM Projekt fuehrt.
-	 *
-	 * Gefragt wird nach `projectIdQuery` und danach im Speicher gefiltert, und
-	 * das ist kein Umweg: `userIdQuery` liefert an derselben Schnittstelle
-	 * zuverlaessig NULL Zeilen — auch fuer Personen, die in derselben Antwort
-	 * per `projectIdQuery` sehr wohl auftauchen. Die Anwendung selbst hat sich
-	 * daran schon einmal die Rollenpruefung stillgelegt
-	 * (`src/server/auth/grants.ts`); ein Testwerkzeug, das in dieselbe Falle
-	 * geht, wuerde die Anwendung fuer kaputt erklaeren, ohne dass sie es ist.
-	 */
 	async rolesOf(user: StackUser): Promise<string[]> {
 		const result = await this.call(
 			'post',
@@ -135,8 +99,6 @@ export class Zitadel {
 		const rows: { userId?: string; roleKeys?: string[]; state?: string }[] =
 			result.result ?? []
 		const row = rows.find((entry) => entry.userId === user.userId)
-		// Genauer Vergleich und kein `endsWith('ACTIVE')`: auf "ACTIVE" endet
-		// auch `USER_GRANT_STATE_INACTIVE`.
 		if (
 			!row ||
 			(row.state ?? 'USER_GRANT_STATE_ACTIVE') !== 'USER_GRANT_STATE_ACTIVE'
@@ -147,18 +109,6 @@ export class Zitadel {
 	}
 }
 
-// --- Anmeldung im Browser --------------------------------------------------
-
-/**
- * Meldet sich ueber die ECHTE Anmeldeoberflaeche an — Login v2, dieselbe wie
- * im Betrieb.
- *
- * Bewusst kein abgekuerzter Weg (Cookie setzen, Token unterschieben): der
- * Anmeldevorgang IST der Teil, in dem die Rollen ins Spiel kommen, und ein
- * untergeschobenes Cookie haette genau den Fehler nicht gezeigt, um den es
- * hier geht — dass ein frisch ausgestelltes Token die Rollen aus einer alten
- * Sitzung erbt statt sie neu zu erfragen.
- */
 export const signIn = async (
 	page: Page,
 	stack: Stack,
@@ -167,40 +117,22 @@ export const signIn = async (
 ): Promise<void> => {
 	await page.goto(options.startAt ?? '/')
 
-	// Schritt 1: Kennung.
-	//
-	// Gewartet wird auf die Adresse der KENNUNGS-Seite und nicht nur auf
-	// „irgendwo in Login v2". Der Weg dorthin geht ueber mehrere Stationen
-	// (Anwendung -> ZITADEL -> /login -> /loginname), und waehrend Login v2
-	// clientseitig umschaltet, stehen kurz die Felder BEIDER Seiten im
-	// Dokument. Ein Zugriff in genau diesem Moment findet zwei Treffer und
-	// scheitert — beobachtet, nicht befuerchtet. `toHaveCount(1)` wartet
-	// deshalb ab, bis nur noch eine Seite da ist.
 	await page.waitForURL(/\/ui\/v2\/login\/loginname/, { timeout: 30_000 })
 	const loginName = page.locator('input[name="loginName"]')
 	await expect(loginName).toHaveCount(1)
 	await loginName.fill(user.email)
-	// `data-testid` statt Beschriftung: die Oberflaeche kommt in mehreren
-	// Sprachen, die Kennzeichnung ist stabil. Die Login-Version ist in
-	// stack.mjs festgenagelt, damit das auch so bleibt.
 	await page.getByTestId('submit-button').click()
 
-	// Schritt 2: Kennwort.
 	await page.waitForURL(/\/ui\/v2\/login\/password/, { timeout: 30_000 })
 	const password = page.locator('input[type="password"]')
 	await expect(password).toHaveCount(1)
 	await password.fill(user.password)
 	await page.getByTestId('submit-button').click()
 
-	// Zurueck auf der Anwendung. Welche Antwort sie gibt (Inhalt oder „noch
-	// nicht freigeschaltet"), entscheiden die einzelnen Tests — hier zaehlt
-	// nur, dass der Anmeldevorgang durch ist.
 	await page.waitForURL((url) => url.origin === stack.appOrigin, {
 		timeout: 60_000,
 	})
 }
-
-// --- MCP -------------------------------------------------------------------
 
 const base64url = (input: Buffer): string => input.toString('base64url')
 
@@ -210,15 +142,6 @@ export type McpToken = {
 	clientSecret: string
 }
 
-/**
- * Verbindet einen MCP-Client so, wie ein echter es tut: dynamische
- * Registrierung, Authorization Code mit PKCE, Zustimmung im Browser,
- * Token-Tausch.
- *
- * Der Browser bringt dabei die bestehende Sitzung der Website mit — genau der
- * Weg, auf dem ein frisch ausgestelltes Token seine Rollen aus einer alten
- * Sitzung erben kann statt sie bei ZITADEL zu erfragen.
- */
 export const connectMcpClient = async (
 	page: Page,
 	stack: Stack,
@@ -286,15 +209,10 @@ export const connectMcpClient = async (
 
 export type McpResult = {
 	status: number
-	/** `true`, wenn das Werkzeug den Aufruf abgelehnt hat. */
 	isError: boolean
 	text: string
 }
 
-/**
- * Ruft ein MCP-Werkzeug auf. Der Streamable-HTTP-Transport antwortet als
- * Server-Sent-Events; die Nutzlast steht in den `data:`-Zeilen.
- */
 export const callMcpTool = async (
 	request: APIRequestContext,
 	stack: Stack,
@@ -338,14 +256,8 @@ export const callMcpTool = async (
 	}
 }
 
-// --- Fixtures --------------------------------------------------------------
-
 export const test = base.extend<{ stack: Stack; zitadel: Zitadel }>({
-	// Playwright wertet die Destrukturierung des ersten Parameters aus, um zu
-	// erkennen, welche Fixtures diese hier braucht — naemlich keine. Ein
-	// benannter Parameter statt `{}` wird zur Laufzeit mit „First argument must
-	// use the object destructuring pattern" abgelehnt.
-	// biome-ignore lint/correctness/noEmptyPattern: siehe oben
+	// biome-ignore lint/correctness/noEmptyPattern: Playwright verlangt Destrukturierung, auch ohne Fixtures
 	stack: async ({}, use) => {
 		await use(readStack())
 	},

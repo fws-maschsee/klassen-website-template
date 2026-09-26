@@ -61,7 +61,6 @@ describe('Rendern und Personalisieren', () => {
 		const rendered = await renderForRecipient(email, mitglied)
 
 		expect(rendered.subject).toBe('Testmail fuer Anna')
-		// `{{anrede}}` spricht ueber den Vornamen an, ohne Geschlechtsangabe.
 		expect(rendered.html).toContain('Hallo Anna,')
 		expect(rendered.text).toContain('Hallo Anna,')
 		expect(rendered.html).toContain('<html')

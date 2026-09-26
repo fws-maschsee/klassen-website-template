@@ -1,18 +1,5 @@
 import { expect, test } from '@playwright/test'
 
-/**
- * Smoke-Tests der frisch erzeugten Klassenseite.
- *
- * Sie laufen gegen einen Server mit `DISABLE_AUTH=true` (siehe
- * `playwright.config.ts`) und pruefen deshalb Inhalte, nicht die Anmeldung.
- * Wer die Anmeldung selbst pruefen will, nimmt `npm run test:e2e:authz` — die
- * Tests dort fahren ein echtes ZITADEL hoch.
- *
- * Diese Datei kommt aus der Vorlage und beschreibt den AUSLIEFERUNGSZUSTAND.
- * Sobald die Klasse eigene Berichte schreibt, gehoert sie angepasst — sie ist
- * dann eine Zusicherung ueber die eigenen Inhalte, nicht mehr ueber die
- * Vorlage.
- */
 test.describe('Smoke-Tests', () => {
 	test('Startseite laedt', async ({ page }) => {
 		await page.goto('/')
@@ -24,9 +11,6 @@ test.describe('Smoke-Tests', () => {
 		await expect(page.locator('h1')).toContainText('Abmelden')
 	})
 
-	// Die Verteiler-Uebersicht kommt zur Laufzeit aus der Datenbank. Eine frisch
-	// erzeugte Klasse hat noch keinen einzigen Verteiler — die Seite muss also
-	// auch dann sauber rendern und nicht erst, wenn Daten da sind.
 	test('Verteiler-Seite laedt, auch ohne einen einzigen Verteiler', async ({
 		page,
 	}) => {
@@ -55,11 +39,6 @@ test.describe('Smoke-Tests', () => {
 		await expect(page.locator('h1')).toContainText('Website eingerichtet')
 	})
 
-	/**
-	 * Der Klassenkalender MUSS ohne Anmeldung erreichbar sein: Kalender-Apps
-	 * schicken kein Cookie mit. Wird dieser Pfad geschuetzt, hoeren saemtliche
-	 * Abos der Eltern STILL auf zu aktualisieren.
-	 */
 	test('Der Kalender ist ohne Anmeldung erreichbar', async ({ request }) => {
 		const response = await request.get('/public/{{ calendar_filename }}')
 		expect(response.status()).toBe(200)

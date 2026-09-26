@@ -20,16 +20,6 @@ export type EmailTemplate = {
 	ps?: string
 }
 
-/**
- * Empfaenger einer Rundmail ("alles ist eine Group"):
- *   - eine Gruppe        -> { kind: "group", value: "eltern" }
- *   - gezielte Auswahl   -> { kind: "explicit", ids: [...] }
- *   - mehrere Verteiler  -> { kind: "union", of: [...] }
- *
- * `group` wird EFFEKTIV aufgeloest, also inklusive aller Untergruppen.
- * `union` dedupliziert ueber die Mitglieds-ID, damit niemand die Mail doppelt
- * bekommt.
- */
 export type Recipients =
 	| { kind: 'group'; value: string }
 	| { kind: 'explicit'; ids: string[] }
@@ -41,12 +31,10 @@ export type Email = {
 	replyTo?: string
 	from?: string
 	template: EmailTemplate
-	/** Archiv-Eintrag: wurde ausserhalb dieses Systems verschickt. */
 	sentExternally?: {
 		date: string
 		note?: string
 	}
-	/** Harter Stopp: wird unabhaengig vom Send-Log NIE verschickt. */
 	skip?: {
 		reason: string
 	}

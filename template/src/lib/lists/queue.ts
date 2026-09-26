@@ -32,11 +32,6 @@ export type ProcessListOneResult =
 	| { kind: 'error'; outboundId: number; error: string }
 	| { kind: 'claim_lost'; outboundId: number }
 
-/**
- * Verarbeitet genau einen bereits gepickten `list_outbound`-Eintrag: atomarer
- * Claim, Originalmail laden, `SendInput` bauen, ueber SES senden. Wirft NICHT
- * — Fehler landen als `error`-Result.
- */
 export const processListOne = async (
 	row: ListOutboundRow,
 	db: Database,
@@ -91,12 +86,6 @@ export type ProcessListOptions = {
 	db?: Database
 }
 
-/**
- * Verarbeitet einen Burst queued `list_outbound`-Eintraege parallel. Teilt
- * sich das Stunden-Cap mit dem Rundmail-Versand: gezaehlt werden BEIDE Quellen
- * (email_send_log + list_outbound), damit die verifizierte Absenderdomain
- * insgesamt unter dem SES-Limit bleibt.
- */
 export const processListBatch = async (
 	options: ProcessListOptions = {},
 ): Promise<ProcessListBatchResult> => {

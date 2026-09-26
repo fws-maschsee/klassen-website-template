@@ -5,11 +5,6 @@ import { computeSignature } from '../src/signature.js'
 const SECRET = 'test-secret'
 const body = new TextEncoder().encode('rohe MIME-Bytes')
 
-/**
- * Gegenstück auf App-Seite (Node-Crypto). Steht bewusst hier ausgeschrieben:
- * Wenn sich das Signaturformat im Worker ändert, muss dieser Test brechen —
- * sonst fällt es erst im Betrieb an einem 401 auf.
- */
 const nodeSignature = (timestamp: string, data: Uint8Array): string =>
 	createHmac('sha256', SECRET)
 		.update(`${timestamp}.`)

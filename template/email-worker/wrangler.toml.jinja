@@ -1,55 +1,19 @@
-# Ein Worker je Klasse, im Repository der jeweiligen Klasse. Der Name trägt die
-# Klasse, damit die Instanzen im Cloudflare-Dashboard unterscheidbar sind.
 name = "{{ worker_name }}"
 main = "src/index.ts"
 compatibility_date = "2026-06-01"
 
-# Wird ausschließlich über Email Routing getriggert (email-Handler, kein
-# fetch-Handler). Es gibt nichts, was über HTTP erreichbar sein müsste — keine
-# workers.dev-URL, keine Preview-URLs.
 workers_dev = false
 preview_urls = false
 
-# Logs. Gehoeren hierher und NICHT ins Dashboard: Der Worker wird ueber die
-# GitHub-Integration aus main gebaut, und jeder Build setzt die Einstellungen
-# aus dieser Datei. Von Hand im Dashboard gesetzte Werte sind nach dem
-# naechsten Build wieder weg.
 [observability]
 enabled = true
 
 [observability.logs]
 invocation_logs = true
 
-# Nicht geheim, darf hier stehen. Das Secret LIST_WEBHOOK_SECRET gehört NICHT
-# hierher und wird auch NICHT mit wrangler gesetzt: Der Worker wird nie von
-# Hand ausgerollt. Erst einen Build aus main laufen lassen, dann das Secret
-# im Cloudflare-Dashboard eintragen.
 [vars]
-# App dieser Klasse. Der Worker hängt /api/lists/incoming an (siehe README.md).
-# Achtung: Das muss die Adresse sein, unter der die App WIRKLICH läuft — bringt
-# die Klasse eine eigene, ältere Domain mit, ist es diese.
 APP_BASE_URL = "https://{{ site_domain }}"
 
-# Listen-Domain OHNE Klassen-Label. Auf *.{{ list_base_domain }} liegt ein
-# Wildcard-MX; jede Klasse bekommt ihre Subdomain damit ohne DNS-Arbeit.
 LIST_DOMAIN = "{{ list_base_domain }}"
 
-# Klasse, die dieser Worker bedient. Wird gegen den Klassenteil der
-# Empfängeradresse geprüft: Post für eine andere Klasse wird abgewiesen und
-# NICHT an diese App weitergereicht. Beim Kopieren dieses Verzeichnisses in ein
-# anderes Klassen-Repo ist das (neben APP_BASE_URL und dem Worker-Namen) der
-# Wert, der angepasst werden muss.
 CLASS_SLUG = "{{ repo_name }}"
-
-# Optional. Ohne Angabe gilt der Default aus src/env.ts (10 MiB). Cloudflare
-# selbst weist alles über 25 MiB schon vor dem Worker ab.
-# MAX_MESSAGE_BYTES = "10485760"
-
-# Optional. Timeout für den App-Aufruf in Millisekunden, Default 10000.
-# REQUEST_TIMEOUT_MS = "10000"
-
-# Routing: Bei einem Worker je Klasse braucht es im Email Routing eine Regel je
-# Listenadresse (<liste>@{{ repo_name }}.{{ list_base_domain }} -> dieser
-# Worker) statt eines Catch-alls. Die Regeln legt der Betreiber per API an,
-# nicht dieses Repository. Welche Listen es gibt und wer an sie senden darf,
-# entscheidet trotzdem allein die App — der Worker fragt nur nach.

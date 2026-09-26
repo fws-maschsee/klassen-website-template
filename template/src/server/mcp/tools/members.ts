@@ -15,11 +15,6 @@ import { syncMembersFromZitadel } from '../../auth/mirror.js'
 import type { McpAuth } from '../guard.js'
 import { registerPersonalDataTool, registerWriteTool } from '../guard.js'
 
-/**
- * Das Adressbuch speichert bewusst nur Name und E-Mail — mehr braucht der
- * Versand nicht. Anrede, Telefonnummer und Notizen gab es einmal und sind
- * entfernt worden (Datenminimierung, Entscheidung des Betreibers).
- */
 const MitgliedInputShape = {
 	id: z
 		.string()
@@ -40,7 +35,6 @@ const MitgliedInputShape = {
 
 const toJson = (value: unknown): string => JSON.stringify(value, null, 2)
 
-/** Haengt die aktuellen Group-Keys an die Row-Ausgabe an. */
 const withGroups = (row: MitgliedRow): MitgliedRow & { groups: string[] } => ({
 	...row,
 	groups: getMitgliedGroups(row.id),
@@ -144,9 +138,6 @@ export const registerMitgliederTools = (
 				'Legt eine Person an oder aktualisiert sie. Pflicht: first_name, last_name. Zugehoerigkeiten via groups[]. PARTIELLES UPDATE: Beim Aktualisieren werden nur die mitgeschickten Felder veraendert — ein Feld weglassen laesst es unveraendert, explizit null leert es (z.B. email: null entfernt die Adresse).',
 			inputSchema: MitgliedInputShape,
 		},
-		// Felder werden 1:1 durchgereicht (kein `?? null`): so bleibt die
-		// Unterscheidung "weggelassen" (undefined => unveraendert) vs. "explizit
-		// null" (=> leeren) bis in upsertMitglied erhalten.
 		(input) => {
 			try {
 				const row = upsertMitglied({

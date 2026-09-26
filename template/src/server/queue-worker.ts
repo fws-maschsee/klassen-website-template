@@ -3,17 +3,6 @@ import { cleanupStuckByTimeout, cleanupStuckOnBoot } from '../lib/db/sendLog.js'
 import { processBatch } from '../lib/email/queue.js'
 import { processListBatch } from '../lib/lists/queue.js'
 
-/**
- * Hintergrund-Worker fuer beide Warteschlangen (Rundmails und Listenmails).
- *
- * Race-Schutz auf zwei Ebenen:
- *  - `running`-Flag verhindert ueberlappende Ticks im selben Prozess.
- *  - Atomarer DB-Claim (`queued -> sending`) verhindert Doppelversand, falls
- *    doch einmal zwei Prozesse laufen.
- *
- * Wir laufen bewusst single-replica: SQLite im Pod, ein Worker.
- */
-
 const DEFAULT_POLL_MS = 30_000
 const MAX_BATCHES_PER_TICK = 50
 const STUCK_TIMEOUT_SECONDS = 30
@@ -29,10 +18,6 @@ const tick = async (): Promise<void> => {
 	if (running) return
 	running = true
 	try {
-		// Vor jedem Batch: haengende `sending`-Eintraege aufraeumen. SMTP-Stalls
-		// beenden sich nicht von selbst mit einem Fehler; ohne diesen Schritt
-		// blieben die Eintraege fuer immer liegen und koennten nie erneut
-		// versendet werden.
 		const stuck =
 			cleanupStuckByTimeout(undefined, STUCK_TIMEOUT_SECONDS) +
 			cleanupStuckListOutbound(undefined, STUCK_TIMEOUT_SECONDS)
@@ -119,9 +104,6 @@ export const startQueueWorker = (
 ): void => {
 	if (timer) return
 	log(`Start (Poll alle ${Math.round(intervalMs / 1000)}s)`)
-	// Reboot-Cleanup: jeder `sending`-Eintrag aus einer frueheren Inkarnation
-	// (Deploy, Crash, OOM) wird zu `error` — niemand wuerde ihn sonst je
-	// abschliessen.
 	const cleaned = cleanupStuckOnBoot() + cleanupStuckListOutbound()
 	if (cleaned > 0)
 		log(`Boot-Aufraeumen: ${cleaned} verwaiste Eintraege auf error gesetzt`)

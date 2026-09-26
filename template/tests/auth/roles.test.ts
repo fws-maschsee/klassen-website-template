@@ -8,11 +8,6 @@ import {
 	ROLE_MITGLIED,
 } from '../../src/server/auth/roles.js'
 
-/**
- * Die Rollenlogik ist winzig und trotzdem die Stelle, an der eine
- * Verwechslung teuer wird: sie entscheidet in der Weboberflaeche UND im
- * MCP-Server, wer was sieht und wer schreiben darf.
- */
 describe('Rollen', () => {
 	it('laesst ohne Rolle niemanden herein', () => {
 		expect(canRead([])).toBe(false)
@@ -21,8 +16,6 @@ describe('Rollen', () => {
 	})
 
 	it('gibt mitglied das Lesen der Verteiler, aber keine Personendaten', () => {
-		// Der Kern der Trennung: "welche Verteiler gibt es und wen erreichen
-		// sie" darf jeder wissen. "Wer steht drauf" nicht.
 		expect(canRead([ROLE_MITGLIED])).toBe(true)
 		expect(canSeePersonalData([ROLE_MITGLIED])).toBe(false)
 		expect(canEdit([ROLE_MITGLIED])).toBe(false)
@@ -35,15 +28,12 @@ describe('Rollen', () => {
 	})
 
 	it('laesst admin auch ohne zusaetzlichen mitglied-Grant lesen', () => {
-		// Sonst haengt der Zugang daran, dass beim Grant beide Haken gesetzt
-		// wurden — genau die Falle, die einmal jemanden aussperrt.
 		expect(canRead([ROLE_ADMIN])).toBe(true)
 	})
 
 	it('kennt die konfigurierbare Leserolle', () => {
 		expect(canRead(['eltern'], 'eltern')).toBe(true)
 		expect(canRead([ROLE_MITGLIED], 'eltern')).toBe(false)
-		// admin kommt unabhaengig von der konfigurierten Leserolle herein.
 		expect(canRead([ROLE_ADMIN], 'eltern')).toBe(true)
 	})
 

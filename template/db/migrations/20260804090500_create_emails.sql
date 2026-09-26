@@ -1,9 +1,4 @@
 -- migrate:up
--- `emails` = Metadaten der Rundmails, deren Inhalt als TypeScript-Datei unter
--- `emails/<slug>.ts` im Repo liegt (Inhalt = Text, keine personenbezogenen
--- Daten). Die Zeile hier ist nur der Anker fuer den FK aus `email_send_log`
--- und ein Cache der wichtigsten Kopfdaten; Quelle der Wahrheit bleibt die
--- Datei.
 CREATE TABLE emails (
   slug            TEXT PRIMARY KEY,
   subject         TEXT NOT NULL,
@@ -13,4 +8,3 @@ CREATE TABLE emails (
 );
 
 -- migrate:down
--- forward-only, absichtlich leer

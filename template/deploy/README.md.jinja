@@ -67,7 +67,34 @@ hier wertlos.
 
 Erzeugt werden sie mit `kubeseal` gegen den **öffentlichen** Schlüssel des
 Clusters — dafür braucht es keinen Cluster-Zugriff, nur die Zertifikatsdatei.
-Die genauen Kommandos stehen als Kommentar in den beiden Dateien.
+
+```bash
+kubectl create secret generic {{ repo_name }}-oidc \
+  --namespace {{ repo_name }} --dry-run=client -o yaml \
+  --from-literal=OIDC_CLIENT_ID="..." \
+  --from-literal=OIDC_CLIENT_SECRET="..." \
+  --from-literal=SESSION_SECRET="$(openssl rand -base64 32)" \
+| kubeseal --format yaml --cert sealed-secrets-public-key.pem \
+> deploy/overlays/production/sealed-oidc.yaml
+
+kubectl create secret generic {{ repo_name }}-mail \
+  --namespace {{ repo_name }} --dry-run=client -o yaml \
+  --from-literal=SES_SMTP_USER="..." \
+  --from-literal=SES_SMTP_PASSWORD="..." \
+  --from-literal=LIST_WEBHOOK_SECRET="$(openssl rand -base64 32)" \
+| kubeseal --format yaml --cert sealed-secrets-public-key.pem \
+> deploy/overlays/production/sealed-mail.yaml
+```
+
+- `OIDC_CLIENT_ID` / `OIDC_CLIENT_SECRET`: der OIDC-Client im ZITADEL-Projekt
+  `{{ repo_name }}`; seine redirect_uri lautet zeichengenau
+  `https://{{ site_domain }}/auth/callback`.
+- `SES_SMTP_USER` / `SES_SMTP_PASSWORD`: SES-SMTP-Credentials, **nicht** die
+  IAM-Access-Keys.
+- `LIST_WEBHOOK_SECRET`: derselbe Wert gehört in den Email-Worker - nach einem
+  Build aus `main` im Cloudflare-Dashboard eintragen, nie per `wrangler`. Aus
+  dem Cluster lesen:
+  `kubectl -n {{ repo_name }} get secret {{ repo_name }}-mail -o jsonpath='{.data.LIST_WEBHOOK_SECRET}' | base64 -d`
 
 `ZITADEL_SERVICE_TOKEN` (der PAT eines **nur lesenden** Machine-Users, für den
 Adressbuch-Abgleich) ist dagegen ein **Infrastruktur-Credential**. Es gehört
