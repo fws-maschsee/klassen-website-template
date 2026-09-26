@@ -29,7 +29,7 @@ jobs:
 
       - name: Keine unersetzten Platzhalter
         run: |
-          # Nach den copier-Variablen suchen, nicht nach `{{`: Workflows enthalten legitim `${{ … }}`.
+          # Nach den copier-Variablen suchen, nicht nach doppelten geschweiften Klammern: Actions-Ausdrücke in den Workflows nutzen sie legitim.
           NAMES=$(grep -E '^[a-z_]+:' copier.yml | cut -d: -f1 | paste -sd'|')
           echo "geprüfte Variablen: $NAMES"
           if grep -RInE "\{\{[[:space:]]*($NAMES)" "$INSTANCE" \
