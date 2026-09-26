@@ -16,14 +16,6 @@ import {
 import type { SendInput } from '../../src/lib/email/transport.js'
 import { createTestDb } from '../helpers/db.js'
 
-/**
- * Die Idempotenz des Versands ist die teuerste Stelle im System: Ein Fehler
- * hier bedeutet, dass 25 Elternhaeuser dieselbe Mail zweimal (oder zehnmal)
- * bekommen. Getestet wird der komplette Weg Einreihen -> Worker -> Log.
- *
- * Alle Namen und Adressen sind frei erfunden.
- */
-
 const EMAILS_DIR = path.join(process.cwd(), 'tests', 'fixtures', 'emails')
 const SLUG = '2026-08-01-testmail'
 
@@ -46,7 +38,6 @@ const failingTransport = {
 const enqueue = (force = false) =>
 	enqueueEmailToRecipients(SLUG, { db, force, emailsDir: EMAILS_DIR })
 
-/** Arbeitet die Queue vollstaendig ab. */
 const drain = async (transport: {
 	send: (i: SendInput) => Promise<{ messageId: string }>
 }) => {
@@ -176,9 +167,7 @@ describe('Worker', () => {
 
 	test('ein zweiter Claim derselben Zeile sendet nicht noch einmal', async () => {
 		await enqueue()
-		// Erster Durchlauf leert die Queue vollstaendig.
 		await drain(okTransport)
-		// Ein weiterer Durchlauf findet nichts mehr.
 		expect(
 			await processBatch({ db, transport: okTransport, emailsDir: EMAILS_DIR }),
 		).toMatchObject({ kind: 'queue_empty' })
@@ -187,7 +176,6 @@ describe('Worker', () => {
 
 	test('parallele Batches senden jede Zeile nur einmal', async () => {
 		await enqueue()
-		// Zwei Batches gleichzeitig: der atomare Claim entscheidet, wer sendet.
 		await Promise.all([
 			drain(okTransport),
 			drain(okTransport),
@@ -214,8 +202,6 @@ describe('Nachbesserung', () => {
 		expect(requeueErrors(SLUG, db)).toBe(2)
 		await drain(okTransport)
 		expect(sent).toHaveLength(2)
-		// Die alten Fehlerzeilen bleiben als Historie stehen, gezaehlt wird der
-		// jeweils LETZTE Status pro Person.
 		expect(countByStatus(SLUG, db)).toMatchObject({ sent: 2, error: 0 })
 		expect(listSendLog(SLUG, db).length).toBe(4)
 	})

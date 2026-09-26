@@ -10,12 +10,6 @@ import {
 } from '../../src/lib/db/oauth.js'
 import { createTestDb } from '../helpers/db.js'
 
-/**
- * Ein MCP-Client bringt kein Sitzungs-Cookie mit, sondern ein Bearer-Token.
- * Ob er schreiben darf, kann deshalb nur an dem haengen, was beim Zustimmen
- * in das Token gewandert ist. Diese Kette darf an keiner Stelle reissen —
- * am wenigsten beim Refresh, der stuendlich passiert.
- */
 describe('Rollen an den OAuth-Tokens', () => {
 	let db: Database
 	let clientId: string
@@ -77,12 +71,10 @@ describe('Rollen an den OAuth-Tokens', () => {
 		expect(verifyAccessToken(rotated.access_token, db)?.roles).toEqual([
 			'admin',
 		])
-		// Das alte Access-Token ist mit der Rotation erledigt.
 		expect(verifyAccessToken(issued.access_token, db)).toBeUndefined()
 	})
 
 	it('liefert fuer Tokens ohne Rollen keine Rollen, nicht alle', () => {
-		// Zeilen aus der Zeit vor der Migration `add_roles_to_oauth_tokens`.
 		const issued = issueTokens(
 			{
 				client_id: clientId,

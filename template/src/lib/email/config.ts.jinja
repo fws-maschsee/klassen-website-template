@@ -1,23 +1,8 @@
 import { CLASS_NAME, SITE_URL } from '../../site.config.js'
 import { instanceName } from '../db/instance.js'
 
-/**
- * Zentrale Absender-/Domainkonfiguration fuer alles, was diese Instanz
- * verschickt. Eine Stelle, damit Rundmails und Mailinglisten garantiert
- * dieselbe verifizierte Domain benutzen.
- */
-
-/**
- * Verifizierte Versandadresse. Muss in SES verifiziert sein, sonst weist SES
- * die Mail ab.
- */
 export const DEFAULT_MAIL_FROM = '{{ mail_from }}'
 
-/**
- * Basis-Domain der Mailinglisten, OHNE das Klassen-Label. Der Worker routet
- * `<liste>@<klasse>.<LIST_BASE_DOMAIN>`, siehe `email-worker/README.md`
- * (`LIST_DOMAIN` dort).
- */
 export const DEFAULT_LIST_BASE_DOMAIN = '{{ list_base_domain }}'
 
 export const mailFrom = (): string => process.env.MAIL_FROM ?? DEFAULT_MAIL_FROM
@@ -25,27 +10,14 @@ export const mailFrom = (): string => process.env.MAIL_FROM ?? DEFAULT_MAIL_FROM
 export const mailFromName = (): string =>
 	process.env.MAIL_FROM_NAME ?? CLASS_NAME
 
-/**
- * Antwortadresse fuer Rundmails. Ohne Konfiguration wird die Versandadresse
- * genommen — bewusst kein geratener Klassen-Mailverteiler.
- */
 export const mailReplyTo = (): string => process.env.MAIL_REPLY_TO ?? mailFrom()
 
-/**
- * Vollstaendige Listen-Domain dieser Klasse, also inklusive Klassen-Label:
- * `{{ repo_name }}.{{ list_base_domain }}`. Eine Liste `eltern` ist damit
- * `eltern@{{ repo_name }}.{{ list_base_domain }}` — genau die Adresse, fuer
- * die der Worker das Routing hat. Der Klassenteil kommt aus derselben Quelle
- * wie die Instanz-Identitaet, damit beide nicht auseinanderlaufen koennen.
- */
 export const listDomain = (): string =>
 	process.env.LIST_DOMAIN ?? `${instanceName()}.${DEFAULT_LIST_BASE_DOMAIN}`
 
-/** Envelope-Absender (Return-Path) fuer Listenmails. */
 export const listEnvelopeFrom = (): string =>
 	process.env.LIST_ENVELOPE_FROM ?? mailFrom()
 
-/** Basis-URL der Website, z.B. fuer Links im Mail-Footer. */
 export const siteUrl = (): string => process.env.PUBLIC_BASE_URL ?? SITE_URL
 
 export const className = (): string => CLASS_NAME

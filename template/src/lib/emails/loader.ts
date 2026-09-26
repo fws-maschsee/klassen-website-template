@@ -5,11 +5,6 @@ import type { Email, LoadedEmail } from './types.js'
 
 const DEFAULT_DIR = path.join(process.cwd(), 'emails')
 
-/**
- * Slugs aller Rundmails im `emails/`-Verzeichnis. Dateien mit `_`-Praefix
- * gelten als Vorlagen und werden ignoriert. Sortiert nach neuesten zuerst —
- * die Slugs sind datumspraefixiert.
- */
 export const listEmailSlugs = (dir: string = DEFAULT_DIR): string[] => {
 	if (!fs.existsSync(dir)) return []
 	return fs

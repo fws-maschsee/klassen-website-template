@@ -1,8 +1,6 @@
 import type { Block, EmailTemplate } from '../emails/types.js'
 import { className, mailReplyTo, siteUrl } from './config.js'
 
-// Zurueckhaltende, warme Palette. Bewusst kein Corporate-Design-Klotz: Das
-// hier sind Elternmails einer Schulklasse, keine Werbung.
 const ACCENT = '#3f6f52'
 const ACCENT_LIGHT = '#eef4f0'
 const INK = '#1f2933'
@@ -57,11 +55,6 @@ const renderBlock = (block: Block): string => {
 	}
 }
 
-/**
- * Baut das MJML-Dokument einer Rundmail. Kopf- und Fusszeile kommen aus
- * `config.ts` (Klassenname, Antwortadresse, Website), damit die zweite
- * Klassen-Instanz nichts umschreiben muss.
- */
 export const template = (props: EmailTemplate): string => {
 	const { preheader, heading, blocks, signature, ps } = props
 	const klasse = className()

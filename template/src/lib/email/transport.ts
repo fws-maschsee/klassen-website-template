@@ -15,15 +15,8 @@ export type SendInput = {
 	html: string
 	text: string
 	attachments?: SendAttachment[]
-	/** Optionaler `Sender:`-Header. */
 	sender?: string
-	/**
-	 * Expliziter SMTP-Envelope (MAIL FROM / RCPT TO). Ohne dies nimmt nodemailer
-	 * `from` als Return-Path — fuer Listen brauchen wir aber die verifizierte
-	 * Versandadresse, sonst scheitert SES an SPF/DKIM-Alignment.
-	 */
 	envelope?: { from: string; to: string }
-	/** Zusaetzliche Roh-Header (z.B. List-Id, List-Unsubscribe). */
 	headers?: Record<string, string>
 }
 
@@ -33,20 +26,8 @@ export type EmailTransport = {
 	send(input: SendInput): Promise<SendOutput>
 }
 
-/**
- * Versand laeuft ueber das SMTP-Interface von **Amazon SES** in der Region
- * eu-central-1.
- *
- * PORT 2587 IST ABSICHT. Nicht auf 587 "vereinheitlichen": 25, 465 und 587
- * waren zwischenzeitlich providerseitig blockiert; 2587 ist der von SES
- * zusaetzlich angebotene STARTTLS-Port und funktioniert unabhaengig von diesen
- * Sperren. Wer den Port aendert, muss vorher nachweisen, dass 587 aus dem Pod
- * heraus wirklich erreichbar ist.
- *
- * Zugangsdaten sind SES-SMTP-Credentials (NICHT die IAM-Access-Keys — SES
- * leitet die SMTP-Credentials aus einem IAM-User ab, sie sehen anders aus).
- */
 export const SES_DEFAULT_HOST = 'email-smtp.eu-central-1.amazonaws.com'
+// 2587 statt 587: 25, 465 und 587 waren providerseitig blockiert.
 export const SES_DEFAULT_PORT = 2587
 
 const requireEnv = (key: string): string => {
@@ -66,7 +47,6 @@ const buildSesTransport = (): Transporter => {
 	cached = nodemailer.createTransport({
 		host: process.env.SES_SMTP_HOST ?? SES_DEFAULT_HOST,
 		port,
-		// 465 waere implizites TLS (SMTPS); 2587 und 587 sind STARTTLS-Ports.
 		secure: port === 465,
 		requireTLS: port !== 465,
 		auth: {
@@ -84,7 +64,6 @@ export const sesTransport = (): EmailTransport => ({
 	},
 })
 
-/** Nur fuer Tests: erzwingt beim naechsten Aufruf einen frischen Transporter. */
 export const resetTransportCache = (): void => {
 	cached = null
 }

@@ -5,15 +5,6 @@ import { resetGrantsConfig } from '../../src/server/auth/grants.js'
 import { syncMembersFromZitadel } from '../../src/server/auth/mirror.js'
 import { createTestDb } from '../helpers/db.js'
 
-/**
- * Der Abgleich ist die Stelle, an der aus einem ZITADEL-Grant ein Empfaenger
- * wird. Drei Eigenschaften muessen halten: ein entzogener Grant verschwindet
- * wirklich, von Hand gepflegte Adressen (Grosseltern, Lehrkraefte) ueberleben
- * den Abgleich, und der Schluessel kommt aus dem NAMEN — die ZITADEL-Nummer
- * steht in `zitadel_user_id` und sonst nirgends.
- *
- * DATENSCHUTZ: ausschliesslich erfundene Namen und example.org-Adressen.
- */
 const grants = (users: unknown[]) =>
 	vi.fn(
 		async () =>
@@ -55,7 +46,6 @@ describe('Abgleich mit ZITADEL', () => {
 			.prepare('SELECT * FROM mitglieder WHERE id = ?')
 			.get('anna-beispiel') as { email: string; zitadel_user_id: string }
 		expect(row.email).toBe('anna.beispiel@example.org')
-		// Die Nummer bleibt erhalten — aber in ihrer eigenen Spalte.
 		expect(row.zitadel_user_id).toBe('u1')
 		const inGroup = db
 			.prepare('SELECT COUNT(*) c FROM group_memberships WHERE mitglied_id = ?')
@@ -79,8 +69,6 @@ describe('Abgleich mit ZITADEL', () => {
 	})
 
 	it('bei Namensgleichheit bekommt der Schluessel ein Suffix', async () => {
-		// Geschwisterkinder und gleichnamige Eltern sind moeglich — deshalb gibt
-		// es bewusst keinen UNIQUE-Index auf den Namen.
 		upsertMitglied(
 			{ first_name: 'Anna', last_name: 'Beispiel', email: 'alt@example.org' },
 			db,
@@ -93,8 +81,6 @@ describe('Abgleich mit ZITADEL', () => {
 	})
 
 	it('schluesselt Zeilen aus der Zeit davor um und nimmt die Verweise mit', async () => {
-		// So sah eine gespiegelte Zeile vor der Umstellung aus: die Nummer im
-		// Schluessel. Die Migration hat `zitadel_user_id` schon gefuellt.
 		db.prepare(
 			`INSERT INTO mitglieder (id, first_name, last_name, email, zitadel_user_id)
        VALUES ('zitadel-u1', 'Anna', 'Beispiel', 'anna.beispiel@example.org', 'u1')`,
@@ -111,8 +97,6 @@ describe('Abgleich mit ZITADEL', () => {
 
 		expect(result).toMatchObject({ rekeyed: 1, rekeyed_with_suffix: 0 })
 		expect(listMitglieder(db).map((m) => m.id)).toEqual(['anna-beispiel'])
-		// Der Opt-out haengt weiter an derselben Person — sonst bekaeme jemand
-		// Post, der ausdruecklich keine wollte.
 		expect(
 			db
 				.prepare('SELECT mitglied_id FROM list_suppressions')
@@ -127,7 +111,6 @@ describe('Abgleich mit ZITADEL', () => {
 				.get(),
 		).toMatchObject({ c: 1 })
 
-		// Zweiter Durchlauf: nichts mehr zu tun, der Schritt ist idempotent.
 		const again = await syncMembersFromZitadel(db)
 		expect(again).toMatchObject({ rekeyed: 0, added: 0 })
 	})
@@ -144,8 +127,6 @@ describe('Abgleich mit ZITADEL', () => {
 	})
 
 	it('laesst von Hand gepflegte Eintraege unberuehrt', async () => {
-		// Der Grund, warum die Tabelle ueberhaupt bleibt: nicht jeder, der Post
-		// bekommen soll, hat einen Zugang.
 		upsertMitglied(
 			{
 				id: 'oma-beispiel',
@@ -173,8 +154,6 @@ describe('Abgleich mit ZITADEL', () => {
 		)
 		const result = await syncMembersFromZitadel(db)
 		expect(result).toMatchObject({ added: 0, updated: 1, total: 1 })
-		// Gefunden wird ueber die Nummer, nicht ueber den Namen: der Schluessel
-		// bleibt deshalb der alte, obwohl der Nachname sich geaendert hat.
 		const rows = listMitglieder(db)
 		expect(rows).toHaveLength(1)
 		expect(rows[0]?.id).toBe('anna-beispiel')

@@ -6,12 +6,6 @@ import {
 	usersWithRole,
 } from '../../src/server/auth/grants.js'
 
-/**
- * Die Berechtigung kommt zur Laufzeit aus ZITADEL, nicht aus einem Token.
- * Diese Tests halten die beiden Eigenschaften fest, die dabei zaehlen:
- * Rollen werden wirklich dort erfragt, und ein Ausfall fuehrt zu einer
- * VERWEIGERUNG statt zu einem Durchwinken.
- */
 describe('Rollen aus ZITADEL', () => {
 	const original = { ...process.env }
 
@@ -32,8 +26,6 @@ describe('Rollen aus ZITADEL', () => {
 	it('fragt die Grants des Projekts dieser Instanz ab', async () => {
 		const fetchMock = vi.fn(async (_url: string, init: RequestInit) => {
 			const body = JSON.parse(String(init.body))
-			// Auf das Projekt eingeschraenkt und NUR danach — `userIdQuery`
-			// liefert gegen die echte Instanz still null Zeilen.
 			expect(body.queries).toEqual([
 				{ projectIdQuery: { projectId: 'proj-1' } },
 			])
@@ -45,8 +37,6 @@ describe('Rollen aus ZITADEL', () => {
 							roleKeys: ['mitglied', 'admin'],
 							state: 'USER_GRANT_STATE_ACTIVE',
 						},
-						// Ein anderer Grant im selben Projekt — darf nicht
-						// mitgeliefert werden.
 						{
 							userId: 'jemand-anderes',
 							roleKeys: ['admin'],
@@ -145,7 +135,6 @@ describe('Rollen aus ZITADEL', () => {
 									roleKeys: ['mitglied'],
 									state: 'USER_GRANT_STATE_ACTIVE',
 								},
-								// Ohne Adresse ist niemand erreichbar — faellt raus.
 								{ userId: 'u2', state: 'USER_GRANT_STATE_ACTIVE' },
 							],
 						}),

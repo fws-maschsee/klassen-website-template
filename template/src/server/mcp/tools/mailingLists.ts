@@ -28,8 +28,6 @@ import {
 
 const toJson = (value: unknown): string => JSON.stringify(value, null, 2)
 
-// localpart einer Listen-Adresse: Kleinbuchstaben/Ziffern, getrennt durch
-// . _ - (z.B. "eltern"). Die Domain kommt aus LIST_DOMAIN.
 const AddressSchema = z
 	.string()
 	.regex(

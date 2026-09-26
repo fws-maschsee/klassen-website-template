@@ -1,14 +1,5 @@
 name: Tests
 
-# Typprüfung und Unit-Tests der App. Bewusst getrennt von `authz.yml`: Jener
-# Lauf fährt ein echtes ZITADEL in Containern hoch und braucht Minuten; dieser
-# hier beantwortet in Sekunden die Frage, ob der Stand überhaupt übersetzt und
-# ob die Regeln um Adressbuch, Verteiler und Versand noch stimmen.
-#
-# Er ruft nichts an, was nicht in diesem Lauf läuft. Die Tests arbeiten gegen
-# eine SQLite-Datei im Arbeitsverzeichnis; ein Zugang zu irgendeinem Dienst
-# kommt hier nicht vor, und `secrets` taucht deshalb nirgends auf.
-
 on:
   push:
     branches: [main]
@@ -34,8 +25,6 @@ jobs:
           node-version: '22'
           cache: 'npm'
 
-      # `npm ci`, nicht `npm install`: Das Lockfile entscheidet, sonst prüft
-      # dieser Lauf andere Versionen als der Build im Dockerfile.
       - run: npm ci
 
       - name: Typecheck

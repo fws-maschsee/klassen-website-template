@@ -20,24 +20,17 @@ export type EnqueueListMessageInput = {
 	body_html: string | null
 	body_text: string | null
 	original_message_id: string | null
-	/**
-	 * Schluessel gegen Doppelverteilung bei Worker-Retries. `null` = keine
-	 * Garantie moeglich (Mail ohne Message-ID).
-	 */
 	idempotency_key: string | null
 	attachments: IncomingAttachment[]
-	/** Empfaenger als (email, mitglied_id?)-Paare. */
 	recipients: { email: string; mitglied_id: string | null }[]
 }
 
 export type EnqueueListMessageResult = {
 	message_id: number
 	enqueued: number
-	/** true, wenn die Mail schon einmal angenommen wurde (Retry des Workers). */
 	duplicate: boolean
 }
 
-/** Findet eine bereits angenommene Mail anhand ihres Idempotenz-Schluessels. */
 export const findListMessageByIdempotencyKey = (
 	key: string,
 	db: Database = openDb(),
@@ -48,16 +41,6 @@ export const findListMessageByIdempotencyKey = (
 		)
 		.get(key)
 
-/**
- * Speichert eine eingegangene Listen-Mail (Message + Anhaenge) und legt fuer
- * jeden Empfaenger eine `queued`-Zeile in `list_outbound` an — alles in EINER
- * Transaktion. Doppelte Empfaengeradressen werden dedupliziert.
- *
- * Idempotenz des Eingangs: Liegt `idempotency_key` bereits vor, wird NICHT
- * erneut verteilt, sondern die bestehende `message_id` zurueckgegeben. Der
- * Cloudflare-Worker darf dieselbe Mail also gefahrlos erneut zustellen (SMTP
- * ist at-least-once).
- */
 export const enqueueListMessage = (
 	input: EnqueueListMessageInput,
 	db: Database = openDb(),
@@ -146,7 +129,6 @@ export const getListAttachments = (
 		)
 		.all(messageId)
 
-/** Aelteste queued-Outbound-Eintraege (aelteste zuerst). */
 export const peekListOutbound = (
 	limit: number,
 	db: Database = openDb(),
@@ -157,7 +139,6 @@ export const peekListOutbound = (
 		)
 		.all(limit)
 
-/** Atomar `queued` -> `sending`. Nur der Gewinner (changes === 1) verarbeitet. */
 export const claimListOutbound = (
 	id: number,
 	db: Database = openDb(),
@@ -221,10 +202,6 @@ export const countListQueued = (db: Database = openDb()): number =>
 		)
 		.get()?.c ?? 0
 
-/**
- * Reboot-/Stuck-Cleanup analog zu email_send_log: haengende `sending`-Eintraege
- * (aelter als `maxAgeSeconds`, oder alle bei `maxAgeSeconds <= 0`) auf `error`.
- */
 export const cleanupStuckListOutbound = (
 	db: Database = openDb(),
 	maxAgeSeconds = 0,

@@ -18,22 +18,6 @@ import { renderForRecipient } from './render.js'
 import type { EmailTransport } from './transport.js'
 import { sesTransport } from './transport.js'
 
-/**
- * Versand-Engine fuer Rundmails. Zwei Phasen, bewusst getrennt:
- *
- *   1. ENQUEUE (`enqueueEmailToRecipients`) — loest die Empfaenger auf und
- *      schreibt je Empfaenger eine `queued`-Zeile. HIER sitzt die Idempotenz:
- *      Wer fuer diesen Slug bereits eine `sent`-Zeile hat, wird uebersprungen;
- *      wer bereits eine `queued`-Zeile hat, wird nicht doppelt eingereiht.
- *   2. WORKER (`processBatch`) — arbeitet die Queue ab. Jeder Eintrag wird
- *      atomar geclaimt (`queued -> sending`), sodass parallele Batches
- *      denselben Eintrag nicht zweimal versenden.
- *
- * Der Rundmail-Weg kennt keine Listenadresse und beruecksichtigt daher nur die
- * GLOBALEN Adress-Sperren (`address_suppressions` mit `list_address = '*'`) —
- * das sind genau die harten Bounces und Beschwerden.
- */
-
 const DEFAULT_HOURLY_CAP = 250
 const DEFAULT_PARALLEL_BURST = 25
 
@@ -53,23 +37,16 @@ const buildReplyTo = (override: string | undefined): string =>
 	override ?? mailReplyTo()
 
 export type EnqueueOptions = {
-	/** Auch an Empfaenger schicken, die bereits eine `sent`-Zeile haben. */
 	force?: boolean
 	db?: Database
-	/** Verzeichnis der Rundmail-Dateien (Tests). */
 	emailsDir?: string
 }
 
 export type EnqueueResult = {
-	/** Anzahl neu in die Queue geschriebener Eintraege. */
 	enqueued: number
-	/** Bereits erfolgreich versendet und ohne `force` uebersprungen. */
 	skipped_already_sent: number
-	/** Standen bereits als `queued` in der Warteschlange. */
 	skipped_already_queued: number
-	/** Kein Eintrag mit E-Mail-Adresse. */
 	skipped_no_email: number
-	/** Adresse ist global gesperrt (Bounce/Beschwerde). */
 	skipped_suppressed: number
 }
 
@@ -88,9 +65,6 @@ export const enqueueEmailToRecipients = async (
 		skipped_suppressed: 0,
 	}
 
-	// Harte Stopps: `skip` deaktiviert den Versand, `sentExternally` markiert
-	// eine Mail, die ausserhalb dieses Systems raus ist. In beiden Faellen wird
-	// nichts eingereiht — unabhaengig vom Send-Log.
 	if (email.skip || email.sentExternally) return result
 
 	const recipients = resolveRecipients(email.recipients, db)
@@ -106,8 +80,6 @@ export const enqueueEmailToRecipients = async (
 					.map((r) => r.mitglied_id),
 			)
 
-	// Auch bereits eingereihte Eintraege vermeiden — sonst laege dieselbe Mail
-	// nach einem zweiten `send_email`-Aufruf zweimal in der Queue.
 	const alreadyQueued = new Set(
 		db
 			.prepare<[string], { mitglied_id: string }>(
@@ -169,17 +141,12 @@ export type ProcessOneResult =
 	| { kind: 'error'; queueId: number; mitgliedId: string; error: string }
 	| { kind: 'claim_lost'; queueId: number; mitgliedId: string }
 
-/**
- * Verarbeitet genau eine bereits gepickte `queued`-Zeile. Wirft NICHT — alle
- * Fehler landen als `error`-Result und als `error`-Zeile im Log.
- */
 export const processOne = async (
 	queued: SendLogRow,
 	db: Database,
 	transport: EmailTransport,
 	emailsDir?: string,
 ): Promise<ProcessOneResult> => {
-	// Atomarer Claim. Verhindert Doppelverarbeitung bei parallelen Batches.
 	if (!claimQueued(queued.id, db)) {
 		return {
 			kind: 'claim_lost',
@@ -234,11 +201,6 @@ export type ProcessBatchResult =
 			results: PromiseSettledResult<ProcessOneResult>[]
 	  }
 
-/**
- * Verarbeitet einen Burst queued-Eintraege parallel. Stoppt frueh, wenn das
- * Stunden-Cap erreicht ist (SES drosselt sonst selbst und wirft Fehler) oder
- * die Queue leer ist.
- */
 export const processBatch = async (
 	options: ProcessOptions = {},
 ): Promise<ProcessBatchResult> => {

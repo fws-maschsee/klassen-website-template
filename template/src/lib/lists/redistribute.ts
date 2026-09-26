@@ -6,21 +6,12 @@ import type {
 import { listDomain, listEnvelopeFrom, mailReplyTo } from '../email/config.js'
 import type { SendInput } from '../email/transport.js'
 
-/** Vollstaendige Adresse einer Liste, z.B. `eltern@example.org`. */
 export const listAddressFull = (list: MailingListRow): string =>
 	`${list.address}@${listDomain()}`
 
 const sanitizeDisplay = (value: string): string =>
 	value.replace(/["\r\n]+/g, ' ').trim()
 
-/**
- * Der `From:`-Header der weiterverteilten Mail zeigt auf die LISTE, nicht auf
- * die Privatadresse des Absenders. Das ist nicht nur Hoeflichkeit: SES
- * signiert nur fuer die eigene verifizierte Domain, und eine fremde
- * From-Domain wuerde an DMARC scheitern. Der Originalabsender bleibt im
- * Display-Namen ("Anna Beispiel via Eltern") und im `X-Original-From`-Header
- * sichtbar.
- */
 export const buildListFrom = (
 	message: ListMessageRow,
 	list: MailingListRow,
@@ -40,12 +31,6 @@ export const applySubjectPrefix = (
 	return subject.includes(trimmed) ? subject : `${trimmed} ${subject}`
 }
 
-/**
- * Baut die auszuliefernde Mail fuer EINEN Empfaenger. Inhalt und Anhaenge
- * bleiben unveraendert; ergaenzt werden nur die Listen-Header, damit
- * Mailprogramme die Nachricht als Listenmail erkennen und Mailfilter sie nicht
- * fuer eine Spoofing-Mail halten.
- */
 export const buildListSendInput = (
 	message: ListMessageRow,
 	attachments: ListAttachmentRow[],

@@ -5,8 +5,13 @@ richtet sich an Eltern; sie bleibt bewusst frei von Technik.
 
 ## Sprache
 
-In diesem Repository wird **auf Deutsch** kommuniziert: Kommentare,
-Commit-Nachrichten, Issues, Antworten.
+In diesem Repository wird **auf Deutsch** kommuniziert: Commit-Nachrichten,
+Issues, Dokumentation, Antworten.
+
+## Minimal comments policy
+
+Keine Kommentare. Guter Code, sprechende Namen und Tests erklären sich selbst.
+Erlaubt ist nur, was muss: Werkzeug-Direktiven (biome-ignore, @ts-expect-error, Shebang …) und höchstens eine Zeile für ein Warum, das kein Name ausdrücken kann. Keine Docstrings, keine Begründungsabsätze, kein auskommentierter Code.
 
 ## Was das ist
 
@@ -45,10 +50,8 @@ commitet.
 
 Gespeichert werden bewusst **nur Vorname, Nachname und E-Mail-Adresse**. Keine
 Anrede, keine Telefonnummer, keine Freitext-Notizen. Wer ein Feld braucht,
-ergänzt es mit einer eigenen Migration und begründet es dort - eine Vorlage soll
-niemandem Felder aufdrängen, die er nicht erhoben haben will.
-`db/migrations/20260804170000_drop_mitglieder_anrede_telefon_notizen.sql`
-führt die Begründung im Einzelnen aus.
+ergänzt es mit einer eigenen Migration und begründet es im Pull Request - eine
+Vorlage soll niemandem Felder aufdrängen, die er nicht erhoben haben will.
 
 Dazu kommt **eine** interne Spalte: `zitadel_user_id`. Sie ist die einzige
 Verbindung zur Anmeldung, die eine Heirat oder einen Anbieterwechsel übersteht
@@ -76,8 +79,7 @@ Repo-URL, Auth-Rolle und Kalenderpfad stehen. `astro.config.mjs`,
 `src/middleware.ts` und die Seiten unter `src/pages/` importieren von dort.
 
 **Beim Wechsel der Klassenlehrkraft wird `CLASS_NAME` geändert - und sonst
-nichts.** Die Datei erklärt bei jedem weiteren Wert, warum er *nicht*
-mitwandert. Kurzfassung:
+nichts.** Warum die übrigen Werte *nicht* mitwandern:
 
 | Wert | Ändern? | Warum |
 | --- | --- | --- |
@@ -100,7 +102,7 @@ Ansprechpartnerin.
 ## Projektstruktur
 
 ```
-src/site.config.ts       zentrale Bezeichnungen, jeder Wert mit Begründung
+src/site.config.ts       zentrale Bezeichnungen
 src/middleware.ts        Auth; /public/ bleibt ohne Login erreichbar
 src/content.config.ts    Content Collections (docs, blog)
 src/content/docs/        Unterlagen        → Route /docs
@@ -163,6 +165,18 @@ nicht im selben Lauf läuft** - weder die Produktivinstanz noch das zentrale
 ZITADEL. Und **kein Mock**: Ein nachgebautes ZITADEL prüft nur den Nachbau,
 genau die Fehler, gegen die diese Tests stehen (Rollen im Token veralten, ein
 Entzug wirkt nie), würde es nicht zeigen.
+
+Ob sich wirklich jemand anmelden kann, prüft ein Skript gegen die laufende
+Seite und das echte ZITADEL - bewusst nicht in der CI, denn es braucht ein
+echtes Konto samt Passwort. `EXPECT=200` für ein Konto mit Grant `mitglied`,
+`EXPECT=403` für eines ohne; erst beide zusammen belegen, dass die
+Rollenprüfung greift. Voraussetzung: `npx playwright install chromium`.
+
+```bash
+BASE=https://{{ site_domain }} ISSUER={{ oidc_issuer }} \
+LOGIN_NAME=<loginname> PASSWORD=<passwort> EXPECT=200 \
+node tests/manual/anmeldung-e2e.mjs
+```
 
 Das Produktions-Image lokal ausprobieren:
 

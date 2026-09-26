@@ -53,7 +53,6 @@ const createMessage = (
 
 type Call = { url: string; init: RequestInit }
 
-/** Ersetzt `fetch` durch eine feste Antwortfolge und protokolliert die Aufrufe. */
 const stubFetch = (responses: Array<Response | Error>): { calls: Call[] } => {
 	const calls: Call[] = []
 	let index = 0
@@ -74,7 +73,6 @@ const json = (status: number, body: unknown) =>
 const headerOf = (call: Call, name: string): string | undefined =>
 	(call.init.headers as Record<string, string>)[name]
 
-/** Der Worker schickt immer Bytes; für Zusicherungen wieder als Text lesen. */
 const bodyOf = (call: Call): string =>
 	new TextDecoder().decode(call.init.body as Uint8Array)
 
@@ -138,8 +136,6 @@ describe('handleEmail — Zustellung', () => {
 
 		await handleEmail(message, env)
 
-		// Der From-Header steckt weiterhin im Body und ist Sache der App; für die
-		// Berechtigung zählt allein dieser Header.
 		expect(headerOf(calls[0], 'X-List-Envelope-From')).toBe(
 			'spammer@boese.example',
 		)
@@ -180,8 +176,6 @@ describe('handleEmail — fremde Klasse', () => {
 
 		await handleEmail(message, env)
 
-		// Das ist der Datenschutz-Fall: eine falsch gesetzte Cloudflare-Regel darf
-		// nicht dazu führen, dass die Mail hier ankommt und weitergereicht wird.
 		expect(calls).toHaveLength(0)
 		expect(message.rejects).toHaveLength(1)
 		expect(message.rejects[0]).toContain('klasse-nachbar')
@@ -295,7 +289,6 @@ describe('handleEmail — Ablehnung (dauerhafter SMTP-Fehler)', () => {
 describe('handleEmail — temporärer Fehler (Mail bleibt beim Absender)', () => {
 	const expectTemporary = async (message: TestMessage, override?: Env) => {
 		await expect(handleEmail(message, override ?? env)).rejects.toThrow()
-		// Entscheidend: KEINE dauerhafte Ablehnung, sonst wäre die Mail weg.
 		expect(message.rejects).toEqual([])
 	}
 

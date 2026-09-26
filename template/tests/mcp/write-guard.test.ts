@@ -6,17 +6,6 @@ import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js'
 import Database from 'better-sqlite3'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
-/**
- * Der Kern der Autorisierung, gegen den echten MCP-Server gemessen: ein Zugang
- * mit `mitglied` darf lesen, aber nicht schreiben; ein Zugang mit `admin`
- * darf beides. Geprueft wird nicht die Hilfsfunktion, sondern der Weg, den ein
- * MCP-Client tatsaechlich nimmt — `tools/call` ueber einen Transport.
- *
- * Die Datenbank ist eine Wegwerf-Datei mit dem echten Schema; `openDb()`
- * merkt sich die erste Verbindung, deshalb wird `DB_PATH` gesetzt, BEVOR
- * irgendein Modul importiert wird, das sie oeffnet.
- */
-
 const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mcp-guard-'))
 const dbFile = path.join(tmpDir, 'test.db')
 
@@ -28,8 +17,6 @@ let buildMcpServer: any
 
 const applyMigrations = (): void => {
 	const dir = path.join(process.cwd(), 'db', 'migrations')
-	// Denselben Weg wie tests/helpers/db.ts nehmen, nur auf eine Datei statt
-	// nach :memory: — der MCP-Server oeffnet die Datei selbst.
 	const db = new Database(dbFile)
 	for (const file of fs
 		.readdirSync(dir)
@@ -76,8 +63,6 @@ afterAll(() => {
 
 describe('MCP-Zugriffsschutz', () => {
 	it('bietet alle Werkzeuge beiden Rollen an', async () => {
-		// Sichtbar bleiben sie, damit ein abgelehnter Aufruf eine Begruendung
-		// bekommt statt "unbekanntes Werkzeug".
 		const client = await connect(['mitglied'])
 		const names = (await client.listTools()).tools.map((t) => t.name)
 		expect(names).toContain('list_mailing_lists')
@@ -87,9 +72,6 @@ describe('MCP-Zugriffsschutz', () => {
 	})
 
 	it('laesst mitglied die Verteiler und Gruppen sehen', async () => {
-		// Der Kern der Trennung: welche Verteiler gibt es, wen erreichen sie.
-		// Diese Frage beantwortet man vor jedem Absenden, und sie braucht keine
-		// einzige fremde Adresse.
 		const client = await connect(['mitglied'])
 		for (const name of ['list_mailing_lists', 'list_groups']) {
 			const result = await client.callTool({ name, arguments: {} })
@@ -121,7 +103,6 @@ describe('MCP-Zugriffsschutz', () => {
 		expect(textOf(result)).toContain('admin')
 		await client.close()
 
-		// Und es ist wirklich nichts entstanden.
 		const admin = await connect(['admin'])
 		const listed = await admin.callTool({
 			name: 'list_mitglieder',
@@ -153,8 +134,6 @@ describe('MCP-Zugriffsschutz', () => {
 	})
 
 	it('weist einen Zugang ganz ohne Rollen ueberall ab', async () => {
-		// Tokens von vor der Rollen-Migration haben keine Rollen. Lesen der
-		// Verteiler ja, Personendaten und Aenderungen nein — sichere Richtung.
 		const client = await connect([])
 		const write = await client.callTool({
 			name: 'delete_mitglied',
@@ -170,9 +149,6 @@ describe('MCP-Zugriffsschutz', () => {
 	})
 
 	it('sperrt einen Zugang ohne jede Rolle auch beim Lesen aus', async () => {
-		// Ein Bearer-Token ueberlebt die Person: wer die Klasse verlaesst,
-		// verliert seinen Grant, sein Token bleibt aber gueltig. Ohne diese
-		// Pruefung koennte er weiter aufzaehlen, welche Verteiler es gibt.
 		const client = await connect([])
 		const result = await client.callTool({
 			name: 'list_mailing_lists',

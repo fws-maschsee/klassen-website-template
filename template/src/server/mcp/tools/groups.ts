@@ -27,8 +27,6 @@ import {
 
 const toJson = (value: unknown): string => JSON.stringify(value, null, 2)
 
-// Key-Konvention: Kleinbuchstaben, Ziffern und Bindestriche, z.B.
-// "eltern" oder "elternvertretung". Verhindert Tippfehler-Keys.
 const GroupKeySchema = z
 	.string()
 	.regex(

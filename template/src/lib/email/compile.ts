@@ -15,17 +15,6 @@ const stripHtmlTags = (html: string): string =>
 		.replace(/\n{3,}/g, '\n\n')
 		.trim()
 
-/**
- * Uebersetzt MJML in Outlook-taugliches HTML und erzeugt gleich die
- * Plaintext-Variante mit. `validationLevel: 'strict'` laesst kaputtes Markup
- * beim Rendern auffliegen statt beim Empfaenger.
- *
- * Warum `async`, obwohl MJML 4 synchron zurueckgibt: MJML 5 hat auf ein
- * Promise umgestellt. `await` auf einen einfachen Wert liefert genau diesen
- * Wert zurueck, also funktioniert diese Funktion mit beiden Versionen. Wir
- * bleiben vorerst bewusst auf MJML 4 (das ist die Version, gegen die die
- * Vorlage laeuft), koennen aber ohne Code-Aenderung aktualisieren.
- */
 export const compile = async (
 	mjmlString: string,
 ): Promise<{ html: string; text: string }> => {

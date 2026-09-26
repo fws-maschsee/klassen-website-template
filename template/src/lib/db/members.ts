@@ -2,30 +2,15 @@ import type { Database } from 'better-sqlite3'
 import { openDb } from './index.js'
 import type { MitgliedInput, MitgliedRow } from './types.js'
 
-/** System-Group: die Elternschaft der Klasse (siehe Migration `create_groups`). */
 export const GROUP_ELTERN = 'eltern'
 
-/**
- * Die Spalten, die das Adressbuch nach aussen zeigt. Bewusst aufgezaehlt statt
- * `SELECT *`: `zitadel_user_id` ist eine INTERNE Verknuepfung zur Anmeldung
- * (siehe src/server/auth/mirror.ts) und hat weder in der Oberflaeche noch in
- * einer MCP-Ausgabe etwas zu suchen. Wer sie braucht, holt sie sich dort, wo
- * sie hingehoert — nicht hier nebenbei mit.
- */
 const COLUMNS = 'id, first_name, last_name, email, created_at, updated_at'
 
-/** Dieselben Spalten mit Tabellen-Alias, fuer Abfragen mit JOIN. */
 const cols = (alias: string): string =>
 	COLUMNS.split(', ')
 		.map((c) => `${alias}.${c}`)
 		.join(', ')
 
-/**
- * Leitet den Schluessel aus dem Namen ab (`vorname-nachname`). Diese Regel
- * ist die EINZIGE Stelle, an der ids entstehen — auch die Spiegelung aus
- * ZITADEL benutzt sie. `normalize('NFD')` traegt beliebige Diakritika ab,
- * nicht nur die deutschen Umlaute.
- */
 export const slugify = (firstName: string, lastName: string): string =>
 	`${firstName}-${lastName}`
 		.toLowerCase()
@@ -38,18 +23,6 @@ export const slugify = (firstName: string, lastName: string): string =>
 		.replace(/[^a-z0-9]+/g, '-')
 		.replace(/^-+|-+$/g, '')
 
-/**
- * Der aus dem Namen abgeleitete Schluessel — und falls der schon jemand
- * anderem gehoert, derselbe mit `-2`, `-3`, ... dahinter. Namensgleichheit ist
- * in einer Schulklasse moeglich (Geschwister, gleichnamige Eltern), deshalb
- * gibt es bewusst keinen UNIQUE-Index auf den Namen.
- *
- * Das loest die SCHLUESSEL-Kollision, nicht die Frage, ob dahinter zweimal
- * dieselbe Person steht — die muss ein Mensch beantworten.
- *
- * `keepId` bleibt frei: beim Umschluesseln einer bestehenden Zeile soll ihr
- * eigener alter Schluessel nicht als Kollision zaehlen.
- */
 export const uniqueMemberId = (
 	firstName: string,
 	lastName: string,
@@ -57,8 +30,6 @@ export const uniqueMemberId = (
 	keepId?: string,
 ): string => {
 	const base = slugify(firstName, lastName)
-	// Voellig namenlos (z.B. leerer Profilname): dann bleibt nur etwas
-	// Kuenstliches, das wenigstens stabil ist.
 	const start = base === '' ? 'person' : base
 	const taken = db.prepare<[string], { id: string }>(
 		'SELECT id FROM mitglieder WHERE id = ?',
@@ -79,10 +50,6 @@ export const listMitglieder = (db: Database = openDb()): MitgliedRow[] =>
 		)
 		.all()
 
-/**
- * Alle Personen, die DIREKT in einer Gruppe stehen. Wird von allen
- * SCHREIBENDEN Operationen und Diffs benutzt.
- */
 export const listMitgliederByGroup = (
 	groupKey: string,
 	db: Database = openDb(),
@@ -96,19 +63,6 @@ export const listMitgliederByGroup = (
 		)
 		.all(groupKey)
 
-/**
- * Alle Personen einer Gruppe EFFEKTIV: direkte Mitglieder PLUS alle Mitglieder
- * der (rekursiven) Kindgruppen, dedupliziert nach Person. Das ist die fuer
- * jeden VERTEILER relevante Menge — eine Obergruppe erreicht damit automatisch
- * alle, die in ihren Untergruppen stehen, ohne dass jemand doppelt gepflegt
- * werden muss. Ohne Kindgruppen identisch zu `listMitgliederByGroup`.
- * `UNION` (nicht `UNION ALL`) im CTE dedupliziert die Gruppen-Keys und
- * terminiert auch bei einem Zyklus in Altdaten.
- *
- * Bewusst getrennt von `listMitgliederByGroup`: SCHREIBENDE Operationen
- * (add/remove/set) arbeiten auf direkten Mitgliedschaften, LESENDE/aufloesende
- * auf der effektiven Menge.
- */
 export const listMitgliederByGroupEffective = (
 	groupKey: string,
 	db: Database = openDb(),
@@ -128,7 +82,6 @@ export const listMitgliederByGroupEffective = (
 		)
 		.all(groupKey)
 
-/** Group-Keys, in denen die Person DIREKT ist (alphabetisch). */
 export const getMitgliedGroups = (
 	mitgliedId: string,
 	db: Database = openDb(),
@@ -163,38 +116,22 @@ export const getMitgliederByIds = (
 		.all(...ids)
 }
 
-/**
- * Faltet Text fuer tolerante Suche: case-insensitiv und diakritik-insensitiv
- * (`Doss` findet `Doß`, `Muller` findet `Müller`).
- */
 const foldText = (value: string): string =>
 	value.toLowerCase().replace(/ß/g, 'ss').normalize('NFD').replace(/[̀-ͯ]/g, '')
 
 export type MitgliederSearchFilter = {
-	/** Freitext ueber first_name, last_name, email (Teilstring). */
 	query?: string
-	/** Nur Personen in dieser Group (Key), EFFEKTIV inkl. Untergruppen. */
 	group?: string
-	/** true = nur mit E-Mail, false = nur ohne. */
 	has_email?: boolean
 }
 
 const isSet = (value: string | null): boolean =>
 	value != null && value.trim() !== ''
 
-/**
- * Tolerante Suche ueber das Adressbuch. Freitext matcht als
- * diakritik-insensitiver Teilstring ueber Name und E-Mail;
- * die optionalen Filter grenzen zusaetzlich ein. Die Datenmenge ist klein
- * (eine Schulklasse), daher wird in JS gefiltert — zuverlaessiger als
- * SQL-LIKE bei Diakritika.
- */
 export const searchMitglieder = (
 	filter: MitgliederSearchFilter,
 	db: Database = openDb(),
 ): MitgliedRow[] => {
-	// Gruppenfilter = EFFEKTIV: wer eine Obergruppe sucht, erwartet auch die
-	// Personen ihrer Untergruppen.
 	let rows = filter.group
 		? listMitgliederByGroupEffective(filter.group, db)
 		: listMitglieder(db)
@@ -218,14 +155,6 @@ export const searchMitglieder = (
 	return rows
 }
 
-/**
- * Legt eine Person an oder aktualisiert sie. **Partielles Update:** Beim
- * Update werden NUR die tatsaechlich mitgeschickten Felder veraendert — ein
- * weggelassenes Feld (`undefined`) bleibt unveraendert, ein explizit als
- * `null` uebergebenes Feld wird geleert (JSON-Merge-Patch, RFC 7396). Beim
- * ersten Anlegen werden weggelassene optionale Felder mit `null` vorbelegt.
- * `groups`: `undefined` => unveraendert, `[]` => alle entfernen.
- */
 export const upsertMitglied = (
 	input: MitgliedInput,
 	db: Database = openDb(),
@@ -275,13 +204,6 @@ export const upsertMitglied = (
 	return row
 }
 
-/**
- * Setzt die Group-Mitgliedschaften einer Person auf exakt `groupKeys`.
- * Validiert jeden Key gegen die Whitelist `groups` und wirft bei unbekanntem
- * Key, BEVOR irgendetwas geaendert wird. Bewusst OHNE eigene Transaktion,
- * damit der Aufruf innerhalb der `bulkUpsertMitglieder`-Transaktion nicht
- * verschachtelt (better-sqlite3 erlaubt keine geschachtelten Transaktionen).
- */
 const syncGroups = (
 	mitgliedId: string,
 	groupKeys: string[],
@@ -321,7 +243,6 @@ export const deleteMitglied = (id: string, db: Database = openDb()): boolean =>
 	db.prepare<[string]>('DELETE FROM mitglieder WHERE id = ?').run(id).changes >
 	0
 
-/** Wirft, wenn die Group nicht in der Whitelist `groups` existiert. */
 const assertGroupExists = (groupKey: string, db: Database): void => {
 	const group = db
 		.prepare<[string], { key: string }>('SELECT key FROM groups WHERE key = ?')
@@ -333,7 +254,6 @@ const assertGroupExists = (groupKey: string, db: Database): void => {
 	}
 }
 
-/** Wirft, wenn eine der IDs kein existierendes Mitglied ist. */
 const assertMitgliederExist = (ids: string[], db: Database): void => {
 	for (const id of ids) {
 		if (!getMitglied(id, db)) {
@@ -342,10 +262,6 @@ const assertMitgliederExist = (ids: string[], db: Database): void => {
 	}
 }
 
-/**
- * Fuegt eine einzelne Group-Mitgliedschaft hinzu (idempotent). Liefert die
- * danach gueltigen Group-Keys der Person.
- */
 export const addToGroup = (
 	groupKey: string,
 	mitgliedId: string,
@@ -359,7 +275,6 @@ export const addToGroup = (
 	return getMitgliedGroups(mitgliedId, db)
 }
 
-/** Entfernt eine einzelne Group-Mitgliedschaft. */
 export const removeFromGroup = (
 	groupKey: string,
 	mitgliedId: string,
@@ -371,21 +286,13 @@ export const removeFromGroup = (
 	return getMitgliedGroups(mitgliedId, db)
 }
 
-/** Resultat der Bulk-/Set-Operationen auf einer Group. */
 export type GroupMembershipResult = {
 	group: string
-	/** IDs, die durch die Operation NEU hinzugekommen sind. */
 	added: string[]
-	/** IDs, die durch die Operation entfernt wurden. */
 	removed: string[]
-	/** Mitglieder-IDs der Group NACH der Operation. */
 	members: string[]
 }
 
-/**
- * Fuegt mehrere Personen in einem Call zu einer Group hinzu (idempotent, in
- * einer Transaktion). Validiert Group und alle IDs vorab.
- */
 export const bulkAddToGroup = (
 	groupKey: string,
 	mitgliedIds: string[],
@@ -410,10 +317,6 @@ export const bulkAddToGroup = (
 	}
 }
 
-/**
- * Entfernt mehrere Personen in einem Call aus einer Group. Unbekannte/nicht
- * zugeordnete IDs werden still ignoriert.
- */
 export const bulkRemoveFromGroup = (
 	groupKey: string,
 	mitgliedIds: string[],
@@ -437,11 +340,6 @@ export const bulkRemoveFromGroup = (
 	}
 }
 
-/**
- * Setzt die Mitgliederliste einer Group in einem Call auf exakt `mitgliedIds`
- * (Diff gegen Ist-Zustand). ACHTUNG: nicht aufgefuehrte bisherige Mitglieder
- * werden entfernt. Validiert Group und alle IDs vorab.
- */
 export const setGroupMembers = (
 	groupKey: string,
 	mitgliedIds: string[],

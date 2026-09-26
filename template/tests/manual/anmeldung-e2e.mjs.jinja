@@ -1,33 +1,9 @@
-/**
- * Echter Anmeldevorgang im Browser: ruft die geschuetzte Seite auf, folgt der
- * Umleitung in die ZITADEL-Login-v2-Oberflaeche, tippt Benutzername und
- * Passwort ein und prueft, was die App danach ausliefert.
- *
- * Bewusst NICHT Teil der CI: der Test braucht ein echtes ZITADEL-Konto samt
- * Passwort. Er ist das Werkzeug fuer die Frage "kann sich wirklich jemand
- * anmelden?" — ein 401 auf `/` beantwortet die naemlich nicht, der beweist
- * nur, dass irgendetwas blockt.
- *
- * Aufruf:
- *   BASE=https://{{ site_domain }} ISSUER={{ oidc_issuer }} \
- *   LOGIN_NAME=<loginname> PASSWORD=<passwort> EXPECT=200 \
- *   node tests/manual/anmeldung-e2e.mjs
- *
- * EXPECT=200  Konto MIT Grant `mitglied` im Projekt der Klasse -> Inhalt.
- * EXPECT=403  Konto OHNE diesen Grant -> verstaendliche Hinweisseite.
- *             Beide Faelle gehoeren zusammen: erst der zweite belegt, dass die
- *             Rollenpruefung ueberhaupt etwas tut.
- *
- * Voraussetzung: `npx playwright install chromium`.
- */
 import { chromium } from 'playwright'
 
 const BASE = process.env.BASE
 const LOGIN = process.env.LOGIN_NAME
 const PASSWORD = process.env.PASSWORD
 const EXPECT = process.env.EXPECT || '200'
-// Aussteller kommt aus der Umgebung: Dieses Skript zeigt von sich aus auf
-// nichts, es prueft genau die Instanz, die man ihm nennt.
 const ISSUER = (process.env.ISSUER || '{{ oidc_issuer }}').replace(
 	/\/+$/,
 	'',
@@ -61,11 +37,7 @@ try {
 	log('\n--- 2. Benutzername eingeben')
 	const userField = page.getByTestId('username-text-input')
 	await userField.waitFor({ timeout: 20000 })
-	// pressSequentially statt fill: die Login-v2-Oberflaeche ist React, der
-	// Weiter-Knopf bleibt ohne echte Tastaturereignisse deaktiviert.
 	await userField.pressSequentially(LOGIN, { delay: 15 })
-	// Der eingetippte Wert wird zurueckgelesen: bei zu schnellem Tippen hat die
-	// Oberflaeche schon Zeichen verschluckt und dann "User not found" gemeldet.
 	let typed = await userField.inputValue()
 	if (typed !== LOGIN) {
 		log(`  Eingabe unvollstaendig (${typed}) — noch einmal`)
@@ -94,7 +66,6 @@ try {
 	await page.waitForURL((u) => u.toString().startsWith(BASE), {
 		timeout: 30000,
 	})
-	// Der Callback leitet noch einmal weiter — die Ruhe danach abwarten.
 	await page.waitForLoadState('networkidle', { timeout: 30000 }).catch(() => {})
 	log('landete auf:', page.url())
 

@@ -23,7 +23,6 @@ export type AuthCode = {
 	code: string
 	client_id: string
 	user_id: string
-	/** Projektrollen der Person zum Zeitpunkt der Zustimmung. */
 	roles: string[] | null
 	code_challenge: string
 	code_challenge_method: string
@@ -38,11 +37,6 @@ export type AccessToken = {
 	token_hash: string
 	client_id: string
 	user_id: string
-	/**
-	 * PROTOKOLL, keine Autorisierungsquelle: welche Rollen bei der Zustimmung
-	 * galten. Massgeblich ist ausschliesslich die Abfrage bei ZITADEL zur
-	 * Laufzeit (`src/server/auth/grants.ts`).
-	 */
 	roles: string[] | null
 	scopes: string[] | null
 	resource: string | null
@@ -73,8 +67,6 @@ const parseJsonArray = (s: string | null): string[] | null => {
 	if (!s) return null
 	return JSON.parse(s) as string[]
 }
-
-// ───────────── Clients ─────────────
 
 type ClientRow = {
 	client_id: string
@@ -188,12 +180,9 @@ export const deleteClient = (
 		.prepare<[string]>('DELETE FROM oauth_clients WHERE client_id = ?')
 		.run(clientId).changes > 0
 
-// ───────────── Authorization Codes ─────────────
-
 export type CreateAuthCodeInput = {
 	client_id: string
 	user_id: string
-	/** Projektrollen der zustimmenden Person (aus dem Sitzungs-Cookie). */
 	roles?: string[]
 	code_challenge: string
 	code_challenge_method?: string
@@ -265,10 +254,6 @@ export const peekAuthCode = (
 		: undefined
 }
 
-/**
- * Markiert den Code als used in einer Transaktion. Wirft, wenn Code unbekannt,
- * bereits used, oder abgelaufen ist.
- */
 export const consumeAuthCode = (
 	code: string,
 	db: Database = openDb(),
@@ -291,8 +276,6 @@ export const consumeAuthCode = (
 		scopes: parseJsonArray(row.scopes),
 	}
 }
-
-// ───────────── Tokens (Access + Refresh) ─────────────
 
 export type IssueTokensInput = {
 	client_id: string
@@ -413,11 +396,6 @@ type RefreshTokenRow = {
 	replaced_by_hash: string | null
 }
 
-/**
- * Tauscht einen Refresh-Token gegen ein neues Token-Paar aus (rotation).
- * Der alte Refresh-Token wird revoked und `replaced_by_hash` auf den neuen Hash gesetzt.
- * Der zugehörige alte Access-Token wird ebenfalls revoked.
- */
 export const rotateRefreshToken = (
 	rawRefreshToken: string,
 	db: Database = openDb(),
@@ -440,10 +418,6 @@ export const rotateRefreshToken = (
 		{
 			client_id: row.client_id,
 			user_id: row.user_id,
-			// Die Rollen wandern unveraendert mit. Ein Refresh ist KEINE neue
-			// Zustimmung — wer seine Rollen neu holen will, meldet sich neu an.
-			// Umgekehrt beendet ein Widerruf (revokeToken/deleteClient) den
-			// Zugang sofort.
 			roles: parseJsonArray(row.roles),
 			scopes: parseJsonArray(row.scopes),
 			resource: row.resource,
@@ -556,8 +530,6 @@ export const verifyClientSecret = (
 	if (!client.client_secret) return false
 	return client.client_secret === providedSecret
 }
-
-// ───────────── Pending Authorizations ─────────────
 
 export type PendingAuthorization = {
 	pending_id: string

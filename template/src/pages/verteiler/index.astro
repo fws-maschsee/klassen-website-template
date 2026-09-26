@@ -6,21 +6,6 @@ import { canSeePersonalData } from '../../server/auth/roles.js'
 
 export const prerender = false
 
-/**
- * Die Verteiler der Klasse — zur Laufzeit aus der Datenbank.
- *
- * Diese Seite ersetzt die Markdown-Dateien, in denen die Adressen einmal von
- * Hand standen. Der Grund steht in src/lib/lists/uebersicht.ts: dieselbe
- * Angabe an zwei Orten heisst, dass eine davon veraltet — und genau das war
- * passiert. Hier steht keine Adresse und keine Domain fest verdrahtet; alles
- * kommt aus `mailing_lists` und `listDomain()`.
- *
- * Sichtbar fuer JEDES Mitglied (Faehigkeit `lesen`): welche Verteiler es gibt
- * und welche Gruppen sie erreichen, ist die Frage, die man vor dem Absenden
- * beantwortet haben will. Sie zu beantworten braucht keine fremde Adresse —
- * deshalb nennt die Seite Gruppen und keine Personen.
- */
-
 const roles = Astro.locals.user?.roles ?? []
 const verteiler = verteilerUebersicht(canSeePersonalData(roles))
 ---

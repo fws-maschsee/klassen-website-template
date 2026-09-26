@@ -4,17 +4,6 @@ import { personalizedAnrede } from './anrede.js'
 import { compile } from './compile.js'
 import { template } from './template.js'
 
-/**
- * Personalisierungs-Marker, die in jedem Textfeld einer Rundmail ersetzt
- * werden:
- *   {{anrede}}      "Hallo <Vorname>,"
- *   {{firstName}}   Vorname
- *   {{lastName}}    Nachname
- *
- * Frueher gab es zusaetzlich `{{anredeDu}}` und `{{salutation}}` sowie den
- * Schalter `duzen` an der Mail. Beides hing an der Spalte `salutation` im
- * Adressbuch, die entfallen ist — es gibt jetzt nur noch eine Ansprache.
- */
 const personalizeString = (text: string, mitglied: MitgliedRow): string =>
 	text
 		.replaceAll('{{anrede}}', personalizedAnrede(mitglied))

@@ -19,8 +19,6 @@ import {
 } from '../../src/lib/db/members.js'
 import { createTestDb } from '../helpers/db.js'
 
-/** Alle Namen und Adressen in diesen Tests sind frei erfunden. */
-
 let db: Database
 
 beforeEach(() => {
@@ -46,8 +44,6 @@ describe('Schema des Adressbuchs', () => {
 	})
 
 	test('listMitglieder gibt die ZITADEL-Nummer NICHT heraus', () => {
-		// Sie ist die Verbindung zur Anmeldung und geht weder die Oberflaeche
-		// noch einen MCP-Client etwas an.
 		upsertMitglied({ id: 'p1', first_name: 'Anna', last_name: 'Beispiel' }, db)
 		db.prepare(
 			"UPDATE mitglieder SET zitadel_user_id = 'u1' WHERE id = 'p1'",
@@ -73,7 +69,6 @@ describe('Schema des Adressbuchs', () => {
 			db,
 		)
 		expect(uniqueMemberId('Anna', 'Beispiel', db)).toBe('anna-beispiel-3')
-		// Die eigene Zeile zaehlt beim Umschluesseln nicht als Kollision.
 		expect(uniqueMemberId('Anna', 'Beispiel', db, 'anna-beispiel')).toBe(
 			'anna-beispiel',
 		)
@@ -91,10 +86,6 @@ describe('Schema des Adressbuchs', () => {
 	})
 
 	test('der Tabellen-Neubau hat die Gruppenzuordnungen nicht mitgerissen', () => {
-		// Der Neubau in der Migration laeuft mit abgeschalteten
-		// Fremdschluesseln — sonst wuerde das DROP TABLE alle
-		// `group_memberships` per CASCADE mitnehmen. Danach muessen sie wieder
-		// scharf sein, sonst faellt es erst produktiv auf.
 		upsertMitglied(
 			{
 				id: 'p1',

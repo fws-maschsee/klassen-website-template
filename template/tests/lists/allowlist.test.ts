@@ -8,11 +8,6 @@ import {
 import { upsertMitglied } from '../../src/lib/db/members.js'
 import { createTestDb } from '../helpers/db.js'
 
-/**
- * Das Sicherheitsventil fuer die Erprobung. Seit die Empfaenger aus den
- * ZITADEL-Grants kommen, stehen dort echte Elternadressen — ein
- * versehentlicher Versand waere nicht zurueckzuholen.
- */
 describe('LIST_RECIPIENT_ALLOWLIST', () => {
 	let db: Database
 	const original = process.env.LIST_RECIPIENT_ALLOWLIST

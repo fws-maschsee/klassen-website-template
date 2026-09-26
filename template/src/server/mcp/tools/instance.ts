@@ -16,13 +16,6 @@ import { type McpAuth, registerReadTool, rolesFor } from '../guard.js'
 
 const toJson = (value: unknown): string => JSON.stringify(value, null, 2)
 
-/**
- * `get_instance_info` (whoami). Es gibt ein Deployment PRO KLASSE mit eigener
- * SQLite-Datei. Im MCP-Client sehen die Instanzen sich sehr aehnlich, und wer
- * in der falschen Instanz schreibt, verschickt Elternpost an die falsche
- * Klasse. Dieses Tool beantwortet vor jedem Schreibzugriff die Frage: mit WEM
- * arbeite ich hier gerade?
- */
 export const registerInstanceTools = (
 	server: McpServer,
 	auth: McpAuth,
@@ -39,8 +32,6 @@ export const registerInstanceTools = (
 		},
 		async () => {
 			const check = checkInstance()
-			// Die eigenen Rechte kommen aus derselben Quelle wie jede andere
-			// Pruefung: frisch aus ZITADEL, nicht aus dem Token.
 			const roles = await rolesFor(auth)
 			return {
 				content: [
@@ -55,14 +46,8 @@ export const registerInstanceTools = (
 							mail_from: mailFrom(),
 							list_domain: listDomain(),
 							auth_provider: authProvider().name,
-							// Wer bin ich hier, und darf ich schreiben? Erspart dem
-							// Client den Versuch, an dem er sonst nur die Fehlermeldung
-							// liest.
 							user_id: auth.userId,
 							roles,
-							// Was dieser Zugang darf, in der Sprache der Werkzeuge:
-							// Verteiler sehen kann jeder Angemeldete, Namen und
-							// Adressen nur `admin`, aendern ebenfalls nur `admin`.
 							may_see_personal_data: canSeePersonalData(roles),
 							may_edit: canEdit(roles),
 							mitglieder_count: listMitglieder().length,

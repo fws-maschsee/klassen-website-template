@@ -2,15 +2,6 @@ import type { Database } from 'better-sqlite3'
 import { openDb } from './index.js'
 import type { GroupInput, GroupRow } from './types.js'
 
-/**
- * Eine Gruppe inkl. Mitgliederzahlen und Hierarchie:
- * - `mitglieder`: DIREKT zugeordnete Personen (Zeilen in group_memberships).
- * - `mitglieder_effektiv`: EFFEKTIV erreichte Personen = direkt + alle
- *   Personen der (rekursiven) Kindgruppen, dedupliziert. Ohne Kindgruppen
- *   identisch zu `mitglieder`.
- * - `children`: direkte Kindgruppen-Keys (diese Gruppe ist deren Obergruppe).
- * - `parents`: direkte Obergruppen-Keys (diese Gruppe ist deren Kind).
- */
 export type GroupMitCount = GroupRow & {
 	mitglieder: number
 	mitglieder_effektiv: number
@@ -42,7 +33,6 @@ export const getGroup = (
 ): GroupRow | undefined =>
 	db.prepare<[string], GroupRow>('SELECT * FROM groups WHERE key = ?').get(key)
 
-/** Legt eine Gruppe an oder aktualisiert ihr Label/aktiv-Flag. */
 export const upsertGroup = (
 	input: GroupInput,
 	db: Database = openDb(),
@@ -65,19 +55,9 @@ export const upsertGroup = (
 	return row
 }
 
-/**
- * Loescht eine Gruppe. Mitgliedschaften UND Hierarchie-Kanten (als Parent wie
- * als Kind) verschwinden via FK CASCADE; die Personen selbst und die anderen
- * Gruppen bleiben erhalten.
- */
 export const deleteGroup = (key: string, db: Database = openDb()): boolean =>
 	db.prepare<[string]>('DELETE FROM groups WHERE key = ?').run(key).changes > 0
 
-// ---------------------------------------------------------------------------
-// Hierarchie: Ober-/Untergruppen (group_edges)
-// ---------------------------------------------------------------------------
-
-/** Wirft, wenn ein Group-Key nicht in der Whitelist `groups` existiert. */
 const assertGroupExists = (key: string, db: Database): void => {
 	if (!getGroup(key, db)) {
 		throw new Error(
@@ -86,7 +66,6 @@ const assertGroupExists = (key: string, db: Database): void => {
 	}
 }
 
-/** Direkte Kindgruppen-Keys einer Gruppe (alphabetisch). */
 export const listChildGroups = (
 	parentKey: string,
 	db: Database = openDb(),
@@ -98,7 +77,6 @@ export const listChildGroups = (
 		.all(parentKey)
 		.map((r) => r.child_key)
 
-/** Direkte Obergruppen-Keys einer Gruppe (alphabetisch). */
 export const listParentGroups = (
 	childKey: string,
 	db: Database = openDb(),
@@ -110,12 +88,6 @@ export const listParentGroups = (
 		.all(childKey)
 		.map((r) => r.parent_key)
 
-/**
- * Der gesamte Teilbaum unter `key` INKLUSIVE `key` selbst: die Gruppe plus
- * alle ihre (rekursiven) Kindgruppen-Keys. Basis fuer die effektive
- * Mitgliedschaft. `UNION` (nicht `UNION ALL`) dedupliziert die Keys und
- * terminiert auch bei einem versehentlichen Zyklus in Altdaten.
- */
 export const subtreeGroupKeys = (
 	key: string,
 	db: Database = openDb(),
@@ -133,10 +105,6 @@ export const subtreeGroupKeys = (
 		.all(key)
 		.map((r) => r.key)
 
-/**
- * Alle (rekursiven) Vorfahren von `key`, also alle Obergruppen, die `key`
- * effektiv enthalten — OHNE `key` selbst.
- */
 export const ancestorGroupKeys = (
 	key: string,
 	db: Database = openDb(),
@@ -154,11 +122,6 @@ export const ancestorGroupKeys = (
 		.all(key)
 		.map((r) => r.key)
 
-/**
- * Erweitert eine Menge von Group-Keys um ihre kompletten Teilbaeume (alle
- * Nachfahren), dedupliziert. Wird beim Aufloesen von Verteilern genutzt, die
- * mehrere Gruppen referenzieren (z.B. Mailinglisten-Empfaengergruppen).
- */
 export const expandToSubtrees = (
 	keys: string[],
 	db: Database = openDb(),
@@ -170,7 +133,6 @@ export const expandToSubtrees = (
 	return [...out]
 }
 
-/** Anzahl EFFEKTIV erreichter Personen (direkt + Kindgruppen, dedupliziert). */
 export const effectiveMemberCount = (
 	key: string,
 	db: Database = openDb(),
@@ -189,12 +151,6 @@ export const effectiveMemberCount = (
 		)
 		.get(key)?.n ?? 0
 
-/**
- * Wuerde die Kante `parent -> child` einen Zyklus erzeugen? Das ist der Fall,
- * wenn `parent` bereits (rekursiv) UNTER `child` haengt — dann schloesse die
- * neue Kante einen Kreis. Die triviale Selbst-Kante (parent === child) wird
- * ueber den CHECK in der Tabelle ohnehin verhindert, hier aber mit abgedeckt.
- */
 export const wouldCreateCycle = (
 	parentKey: string,
 	childKey: string,
@@ -202,11 +158,6 @@ export const wouldCreateCycle = (
 ): boolean =>
 	parentKey === childKey || subtreeGroupKeys(childKey, db).includes(parentKey)
 
-/**
- * Macht `child` zu einer Untergruppe von `parent` (idempotent). Validiert,
- * dass beide Gruppen existieren, und verhindert Zyklen. Liefert die danach
- * gueltigen direkten Kindgruppen von `parent`.
- */
 export const addSubgroup = (
 	parentKey: string,
 	childKey: string,
@@ -228,10 +179,6 @@ export const addSubgroup = (
 	return listChildGroups(parentKey, db)
 }
 
-/**
- * Entfernt die Untergruppen-Beziehung `parent -> child`. Liefert die danach
- * gueltigen direkten Kindgruppen von `parent`.
- */
 export const removeSubgroup = (
 	parentKey: string,
 	childKey: string,
@@ -243,23 +190,13 @@ export const removeSubgroup = (
 	return listChildGroups(parentKey, db)
 }
 
-/** Resultat von `setSubgroups`. */
 export type SubgroupResult = {
 	parent: string
-	/** Kind-Keys, die NEU hinzugekommen sind. */
 	added: string[]
-	/** Kind-Keys, die entfernt wurden. */
 	removed: string[]
-	/** Direkte Kindgruppen NACH der Operation (alphabetisch). */
 	children: string[]
 }
 
-/**
- * Setzt die direkten Kindgruppen von `parent` in EINEM Call auf exakt
- * `childKeys` (Diff gegen Ist-Zustand). Validiert `parent`, alle Kinder und
- * prueft jeden neuen Kandidaten auf Zyklen, BEVOR etwas geschrieben wird — die
- * ganze Operation laeuft in einer Transaktion. `[]` loest alle Kinder.
- */
 export const setSubgroups = (
 	parentKey: string,
 	childKeys: string[],

@@ -29,14 +29,6 @@ import {
 import { resolveRecipients } from '../../src/lib/emails/recipients.js'
 import { createTestDb } from '../helpers/db.js'
 
-/**
- * Die rekursive Gruppenaufloesung und die Zykluspruefung sind die Stellen, an
- * denen ein Fehler richtig teuer wird: Entweder bekommt jemand Post, der sie
- * nicht bekommen darf, oder eine Endlosschleife legt den Versand lahm.
- *
- * Alle Namen hier sind frei erfunden.
- */
-
 let db: Database
 
 const seedPerson = (id: string, email: string | null = `${id}@example.org`) =>
@@ -44,7 +36,6 @@ const seedPerson = (id: string, email: string | null = `${id}@example.org`) =>
 
 beforeEach(() => {
 	db = createTestDb()
-	// 'eltern' kommt aus der Migration. Dazu drei Untergruppen zum Spielen.
 	upsertGroup({ key: 'ag-basar', label: 'AG Basar' }, db)
 	upsertGroup({ key: 'ag-garten', label: 'AG Garten' }, db)
 	upsertGroup({ key: 'elternvertretung', label: 'Elternvertretung' }, db)
@@ -59,7 +50,6 @@ describe('effektive Mitgliedschaft', () => {
 		addSubgroup('eltern', 'ag-basar', db)
 		addSubgroup('eltern', 'ag-garten', db)
 
-		// Direkt: keine eigenen Mitglieder. Effektiv: beide.
 		expect(listMitgliederByGroup('eltern', db)).toEqual([])
 		expect(
 			listMitgliederByGroupEffective('eltern', db)
@@ -171,7 +161,6 @@ describe('Zyklusschutz', () => {
 		expect(() =>
 			setSubgroups('elternvertretung', ['ag-basar', 'eltern'], db),
 		).toThrow(/Zyklus/)
-		// ag-basar darf NICHT angelegt worden sein: Validierung vor dem Schreiben.
 		expect(listChildGroups('elternvertretung', db)).toEqual([])
 	})
 

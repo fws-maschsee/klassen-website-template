@@ -1,34 +1,15 @@
-# Copier-Konfiguration.
-#
-# Alles unter template/ wird in das erzeugte Repository geschrieben; alles
-# andere (CI-Harness, tests/, diese Datei) bleibt im Template.
 _min_copier_version: "9.4.0"
 _subdirectory: template
 _envops:
   trim_blocks: true
   lstrip_blocks: true
 
-# Die Lockfiles werden beim Erzeugen mitgeliefert, damit `npm ci` im Dockerfile
-# sofort funktioniert. Bei `copier update` gewinnt aber die Lockfile der
-# Instanz: dort haben Dependabot und lokale `npm install`-Läufe längst neuere
-# Auflösungen eingetragen, und ein Rückschreiben der Template-Lockfile würde
-# die Instanz auf den Stand des Templates zurückwerfen.
-#
-# Das Produktions-Overlay steht ebenfalls hier: `deploy/overlays/production/`
-# trägt den gepinnten Image-Tag (den der Deploy-Workflow schreibt) und die
-# SealedSecrets der Instanz. Beides ist Zustand der Klasse, kein Vorlagen-
-# Inhalt — ein `copier update` würde sonst das laufende Deployment auf einen
-# Platzhalter zurücksetzen.
 _skip_if_exists:
   - package-lock.json
   - email-worker/package-lock.json
   - deploy/overlays/production/kustomization.yaml
   - deploy/overlays/production/sealed-oidc.yaml
   - deploy/overlays/production/sealed-mail.yaml
-
-# ---------------------------------------------------------------------------
-# Klasse
-# ---------------------------------------------------------------------------
 
 class_display_name:
   type: str
@@ -45,8 +26,7 @@ class_slug:
     Technischer Kurzname, klein und ohne Umlaute (z. B. "musterfrau"). Er
     steckt im Repository-Namen, im Hostnamen, im Kubernetes-Namespace, im
     Dateinamen der Datenbank und im Dateinamen des Kalenders. NACH dem Erzeugen
-    ist er praktisch unveränderlich - siehe die Kommentare in
-    src/site.config.ts.
+    ist er praktisch unveränderlich - siehe CLAUDE.md der erzeugten Klasse.
   default: >-
     {{ class_display_name | lower | replace('klasse ', '') | replace('ä', 'ae') | replace('ö', 'oe') | replace('ü', 'ue') | replace('ß', 'ss') | replace(' ', '-') | trim }}
   validator: >-
@@ -65,10 +45,6 @@ first_post_date:
   default: "2026-01-01"
   validator: >-
     {% if not first_post_date | regex_search('^[0-9]{4}-[0-9]{2}-[0-9]{2}$') %}first_post_date muss das Format JJJJ-MM-TT haben{% endif %}
-
-# ---------------------------------------------------------------------------
-# Repository und Domain
-# ---------------------------------------------------------------------------
 
 github_org:
   type: str
@@ -123,15 +99,6 @@ contact_email:
   validator: >-
     {% if '@' not in contact_email %}contact_email muss eine E-Mail-Adresse sein{% endif %}
 
-# ---------------------------------------------------------------------------
-# Anmeldung (ZITADEL)
-# ---------------------------------------------------------------------------
-# Die Anmeldung läuft über OpenID Connect gegen das zentrale ZITADEL der
-# Schule. Rollen, Grants und der OIDC-Client selbst sind Identity-Content: Sie
-# werden über die ZITADEL-API gepflegt und stehen in KEINEM Repository. Die
-# Vorlage fragt deshalb nur nach den Bezeichnern, die die App zur Laufzeit
-# braucht.
-
 oidc_issuer:
   type: str
   help: >-
@@ -159,10 +126,6 @@ zitadel_project_id:
     voneinander, denn ein Token trägt nur die Rollen des Projekts, zu dem der
     OIDC-Client gehört. Leer lassen, wenn das Projekt erst noch angelegt wird.
   default: ""
-
-# ---------------------------------------------------------------------------
-# Mailinglisten und Versand
-# ---------------------------------------------------------------------------
 
 mail_from:
   type: str
@@ -192,23 +155,15 @@ worker_name:
   validator: >-
     {% if not worker_name | regex_search('^[a-z0-9][a-z0-9-]*$') %}worker_name darf nur a-z, 0-9 und - enthalten{% endif %}
 
-# ---------------------------------------------------------------------------
-# Kalender
-# ---------------------------------------------------------------------------
-
 calendar_filename:
   type: str
   help: >-
     Dateiname des Klassenkalenders unter public/public/. Die Eltern
     abonnieren ihn als webcal://<site_domain>/public/<dieser Name>. Der Name
-    darf danach NIE wieder geändert werden - siehe src/site.config.ts.
+    darf danach NIE wieder geändert werden - siehe CLAUDE.md der erzeugten Klasse.
   default: "{{ class_slug }}.ics"
   validator: >-
     {% if not calendar_filename | regex_search('^[a-z0-9._-]+\.ics$') %}calendar_filename muss auf .ics enden und darf nur a-z, 0-9, . _ - enthalten{% endif %}
-
-# ---------------------------------------------------------------------------
-# Betrieb
-# ---------------------------------------------------------------------------
 
 gitops_repo:
   type: str

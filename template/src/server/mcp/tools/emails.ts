@@ -26,10 +26,6 @@ import {
 
 const toJson = (value: unknown): string => JSON.stringify(value, null, 2)
 
-/**
- * Legt die Metadaten der Mail in der DB an. Noetig, weil `email_send_log` per
- * FK auf `emails.slug` zeigt — ohne diese Zeile schlaegt das Einreihen fehl.
- */
 const syncEmailMeta = async (slug: string): Promise<void> => {
 	const email = await loadEmail(slug)
 	upsertEmailMeta({
