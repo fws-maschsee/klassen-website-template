@@ -1,0 +1,98 @@
+name: Main
+
+# Die Push-Prüfungen für main laufen gesammelt hier, damit ein einziger Vorab-Job für alle entscheidet: War der
+# gemergte Stand schon im PR grün, entfallen sie; ein übersprungener Job kostet keine Minute. Deploy bleibt eigenständig.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  vorab:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: read
+      pull-requests: read
+    outputs:
+      geprueft: ${{ steps.pr.outputs.geprueft }}
+    steps:
+      - name: Schon im PR geprueft?
+        id: pr
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          voll() {
+            echo "::notice title=Volle Pruefung::$1"
+            echo "Volle Prüfung: $1" >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          }
+          api() { gh api "repos/$GITHUB_REPOSITORY/$1" "${@:2}"; }
+
+          [ "$GITHUB_REF" = refs/heads/main ] || voll "Lauf auf $GITHUB_REF"
+          treffer=$(api "commits/$GITHUB_SHA/pulls" --jq "
+            [.[] | select(.merge_commit_sha == \"$GITHUB_SHA\" and .merged_at != null)][0] // empty
+            | [.number, .head.sha, .head.ref] | @tsv")
+          [ -n "$treffer" ] || voll "$GITHUB_SHA kommt aus keinem gemergten PR"
+          read -r nr kopf zweig <<<"$treffer"
+
+          # Enthielt der PR den main von vor dem Merge, hat sein Lauf genau den Baum geprüft, der jetzt auf main liegt.
+          vorher=$(api "git/commits/$GITHUB_SHA" --jq '.parents[0].sha')
+          lage=$(api "compare/$vorher...$kopf" --jq .status)
+          case "$lage" in
+            ahead|identical) ;;
+            *) voll "PR #$nr stand nicht auf dem main vor dem Merge ($lage)" ;;
+          esac
+          [ "$(api "git/commits/$GITHUB_SHA" --jq .tree.sha)" = "$(api "git/commits/$kopf" --jq .tree.sha)" ] \
+            || voll "PR #$nr: Baum von $GITHUB_SHA weicht vom Kopf $kopf ab"
+
+          datei=${GITHUB_WORKFLOW_REF#"$GITHUB_REPOSITORY/"}
+          datei=${datei%@*}
+          noetig=$(api "contents/$datei?ref=$GITHUB_SHA" -H 'Accept: application/vnd.github.raw' \
+            | yq -o=json '[.jobs[] | select(has("uses")) | .uses]' | jq -r '.[] | ltrimstr("./")')
+          # pull_requests ist nach dem Löschen des Zweigs leer, deshalb über Zweig und Kopf zuordnen.
+          laeufe=$(api "actions/runs?head_sha=$kopf&event=pull_request&per_page=100" --jq '.workflow_runs')
+          belege=""
+          for pfad in $noetig; do
+            lauf=$(jq -c --arg p "$pfad" --arg z "$zweig" \
+              '[.[] | select(.path == $p and .head_branch == $z)] | max_by(.created_at) // empty' <<<"$laeufe")
+            [ -n "$lauf" ] || voll "PR #$nr: kein Lauf von $pfad"
+            [ "$(jq -r .conclusion <<<"$lauf")" = success ] || voll "PR #$nr: $pfad war nicht grün"
+            # Auch ein Lauf mit übersprungenen Jobs zählt als success, hat aber nichts geprüft.
+            rest=$(api "actions/runs/$(jq -r .id <<<"$lauf")/jobs?per_page=100" \
+              --jq '[.jobs[] | select(.conclusion != "success")] | length')
+            [ "$rest" = 0 ] || voll "PR #$nr: in $pfad lief nicht jeder Job grün durch"
+            belege+="- $pfad: $(jq -r .html_url <<<"$lauf")"$'\n'
+          done
+
+          {
+            echo "Schon geprüft in PR #$nr, Kopf $kopf hat denselben Baum wie $GITHUB_SHA:"
+            echo
+            printf '%s' "$belege"
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "::notice title=Schon im PR geprueft::PR #$nr, gleicher Baum — Prüfjobs übersprungen"
+          echo "geprueft=true" >> "$GITHUB_OUTPUT"
+
+  test:
+    needs: vorab
+    # !cancelled(): scheitert der Vorab-Job, wird voll geprüft statt gar nicht.
+    if: ${{ !cancelled() && needs.vorab.outputs.geprueft != 'true' }}
+    uses: ./.github/workflows/test.yml
+
+  biome:
+    needs: vorab
+    if: ${{ !cancelled() && needs.vorab.outputs.geprueft != 'true' }}
+    permissions:
+      contents: read
+      pull-requests: write
+    uses: ./.github/workflows/biome.yml
+
+  authz:
+    needs: vorab
+    if: ${{ !cancelled() && needs.vorab.outputs.geprueft != 'true' }}
+    uses: ./.github/workflows/authz.yml

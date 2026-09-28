@@ -1,10 +1,10 @@
 name: Tests
 
 on:
-  push:
-    branches: [main]
   pull_request:
     branches: [main]
+  # Auf main ruft main.yml diesen Workflow auf.
+  workflow_call:
 
 permissions:
   contents: read
