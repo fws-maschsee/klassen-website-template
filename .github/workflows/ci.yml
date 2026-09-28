@@ -267,6 +267,14 @@ jobs:
       - name: copier update muss konfliktfrei durchlaufen
         if: steps.old.outputs.skip != 'true'
         working-directory: /tmp/alte-instanz
+        # Ein im Hintergrund laufendes `git gc --auto` schreibt in copiers Arbeitsklon, während copier ihn löscht
+        # (OSError: Directory not empty: 'objects').
+        env:
+          GIT_CONFIG_COUNT: '2'
+          GIT_CONFIG_KEY_0: gc.auto
+          GIT_CONFIG_VALUE_0: '0'
+          GIT_CONFIG_KEY_1: maintenance.auto
+          GIT_CONFIG_VALUE_1: 'false'
         run: |
           uvx --from 'copier>=9.4' copier update --defaults \
             --conflict inline --vcs-ref HEAD

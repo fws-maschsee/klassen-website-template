@@ -7,7 +7,7 @@ on:
 
 {% raw %}
 permissions:
-  contents: read
+  contents: write
   packages: write
 
 concurrency:
@@ -18,20 +18,20 @@ env:
   IMAGE: ghcr.io/{% endraw %}{{ github_org }}{% raw %}/{% endraw %}{{ repo_name }}{% raw %}
 
 jobs:
-  build:
-    strategy:
-      matrix:
-        include:
+  # Ein Job, weil es nur eine Architektur gibt: jeder weitere Job würde eigens auf volle Minuten aufgerundet. Für eine
+  # zweite Architektur Bauen bis Push per Digest wieder als Matrix über native Runner abspalten und das Manifest in
+  # einem Folgejob aus allen Digests erzeugen.
+  deploy:
+    if: github.ref == 'refs/heads/main'
 {% endraw %}{% if target_arch == 'arm64' %}
-          - platform: linux/arm64
-            arch: arm64
-            runner: ubuntu-24.04-arm # nativ, nie QEMU
+    runs-on: ubuntu-24.04-arm # nativ, nie QEMU
 {% else %}
-          - platform: linux/amd64
-            arch: amd64
-            runner: ubuntu-latest # nativ, nie QEMU
+    runs-on: ubuntu-latest # nativ, nie QEMU
 {% endif %}{% raw %}
-    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    env:
+      PLATFORM: linux/{% endraw %}{{ target_arch }}{% raw %}
+      ARCH: {% endraw %}{{ target_arch }}{% raw %}
     steps:
       - uses: actions/checkout@v5
 
@@ -51,14 +51,14 @@ jobs:
           context: .
           load: true
           tags: ${{ env.IMAGE }}:verify
-          platforms: ${{ matrix.platform }}
+          platforms: ${{ env.PLATFORM }}
 
       - name: Verify image architecture
         run: |
-          ARCH=$(docker image inspect "${IMAGE}:verify" --format '{{.Architecture}}')
-          echo "architecture: $ARCH"
-          [ "$ARCH" = "${{ matrix.arch }}" ] || {
-            echo "::error::expected ${{ matrix.arch }}, got $ARCH"; exit 1; }
+          GEBAUT=$(docker image inspect "${IMAGE}:verify" --format '{{.Architecture}}')
+          echo "architecture: $GEBAUT"
+          [ "$GEBAUT" = "$ARCH" ] || {
+            echo "::error::expected $ARCH, got $GEBAUT"; exit 1; }
 
       - name: Smoke test the image
         run: |
@@ -92,86 +92,24 @@ jobs:
         with:
           context: .
           push: true
-          platforms: ${{ matrix.platform }}
+          platforms: ${{ env.PLATFORM }}
           outputs: type=image,name=${{ env.IMAGE }},push-by-digest=true,name-canonical=true
-
-      - name: Export digest
-        run: |
-          mkdir -p /tmp/digests
-          digest="${{ steps.build.outputs.digest }}"
-          touch "/tmp/digests/${digest#sha256:}"
-
-      - name: Upload digest
-        uses: actions/upload-artifact@v4
-        with:
-          name: digest-${{ matrix.arch }}
-          path: /tmp/digests/*
-          if-no-files-found: error
-          retention-days: 1
-
-  merge:
-    needs: build
-    runs-on: ubuntu-latest
-    steps:
-      - name: Download digests
-        uses: actions/download-artifact@v4
-        with:
-          path: /tmp/digests
-          pattern: digest-*
-          merge-multiple: true
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Log in to ghcr.io
-        uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Compute tag
         id: tag
         run: echo "tag=$(date -u +%Y%m%d%H%M%S)" >> "$GITHUB_OUTPUT"
 
       - name: Create and push manifest
-        working-directory: /tmp/digests
         run: |
           docker buildx imagetools create \
             -t ${{ env.IMAGE }}:${{ steps.tag.outputs.tag }} \
             -t ${{ env.IMAGE }}:${{ github.sha }} \
             -t ${{ env.IMAGE }}:latest \
-            $(printf '${{ env.IMAGE }}@sha256:%s ' *)
-
-      - name: Report the built tags
-        run: |
-          {
-            echo "### Image gebaut"
-            echo
-            echo '```'
-            echo "${IMAGE}:${{ github.sha }}"
-            echo "${IMAGE}:${{ steps.tag.outputs.tag }}"
-            echo '```'
-            echo
-            echo "Der Job \`deploy\` pinnt gleich \`:${{ github.sha }}\` und"
-            echo "veroeffentlicht das Overlay auf dem Branch \`production\`."
-          } >> "$GITHUB_STEP_SUMMARY"
-
-  # Eigener Branch statt Commit auf main: der Bot schreibt nicht in den Arbeitsbranch und löst keinen neuen Lauf aus.
-  deploy:
-    needs: merge
-    if: github.ref == 'refs/heads/main'
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write # Vorgabe für Workflow-Token ist read
-    steps:
-      - uses: actions/checkout@v5
-        with:
-          ref: ${{ github.sha }} # der gebaute Stand, nicht die inzwischen weitergelaufene Spitze von main
+            ${{ env.IMAGE }}@${{ steps.build.outputs.digest }}
 
       - name: Install kustomize
         run: |
-          curl -sSL https://github.com/kubernetes-sigs/kustomize/releases/download/kustomize%2Fv5.4.3/kustomize_v5.4.3_linux_amd64.tar.gz \
+          curl -sSL "https://github.com/kubernetes-sigs/kustomize/releases/download/kustomize%2Fv5.4.3/kustomize_v5.4.3_linux_${ARCH}.tar.gz" \
             | sudo tar xz -C /usr/local/bin
           kustomize version
 
@@ -182,6 +120,7 @@ jobs:
           kustomize build . > /dev/null # ein kaputtes Overlay darf nie auf production landen
           git --no-pager diff -- kustomization.yaml
 
+      # Eigener Branch statt Commit auf main: der Bot schreibt nicht in den Arbeitsbranch und löst keinen neuen Lauf aus.
       - name: Publish pinned overlay to the GitOps 'production' branch
         run: |
           git config user.name  "deploy-bot"
@@ -198,6 +137,7 @@ jobs:
             echo
             echo '```'
             echo "${IMAGE}:${{ github.sha }}"
+            echo "${IMAGE}:${{ steps.tag.outputs.tag }}"
             echo '```'
             echo
             echo "Argo CD zieht den Branch \`production\` und rollt aus."

@@ -1,11 +1,11 @@
 name: Autorisierung
 
 on:
-  push:
-    branches: [main]
   pull_request:
     branches: [main]
   workflow_dispatch:
+  # Auf main ruft main.yml diesen Workflow auf.
+  workflow_call:
 
 permissions:
   contents: read
