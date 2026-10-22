@@ -25,7 +25,7 @@
 	},
 	"dependencies": {
 		"@astrojs/check": "^0.9.6",
-		"@astrojs/node": "^9.0.0",
+		"@astrojs/node": "^11.0.0",
 		"@astrojs/tailwind": "^6.0.2",
 		"@levino/shipyard-base": "0.6.1",
 		"@levino/shipyard-blog": "0.6.1",
