@@ -120,9 +120,13 @@ jobs:
         working-directory: /tmp/instanz
         run: npm test
 
+      - uses: biomejs/setup-biome@v2
+        with:
+          working-dir: /tmp/instanz
+
       - name: Biome
         working-directory: /tmp/instanz
-        run: npx @biomejs/biome ci
+        run: biome ci
 
   email-worker:
     needs: generate
