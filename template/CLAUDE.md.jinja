@@ -20,11 +20,11 @@ Erzeugt aus
 
 Stack:
 
-- **Astro 5** im SSR-Modus (`output: 'server'`) über `@astrojs/node` im Modus
+- **Astro 7** im SSR-Modus (`output: 'server'`) über `@astrojs/node` im Modus
   `middleware` - der Astro-Server wird von `server.ts` in Express eingehängt,
   gestartet wird mit `npm start`, nicht mit `node dist/server/entry.mjs`
 - **Shipyard** als Baukasten: `@levino/shipyard-base`, `-docs`, `-blog`
-- **Tailwind 3 + daisyUI 4**
+- **Tailwind 4 + daisyUI 5**, eingebunden über `src/styles/global.css`
 - **Anmeldung** über OpenID Connect gegen das zentrale ZITADEL der Schule
   ({{ oidc_issuer }}), Projekt dieser Klasse: `{{ repo_name }}`
 - **SQLite** (better-sqlite3) auf einem persistenten Volume unter `/data`,
@@ -273,15 +273,12 @@ real passiert und haben Zeit gekostet. Die vollständige Liste steht in der
 ### 1. Shipyard-Versionen sind gepinnt
 
 In `package.json` stehen bei `@levino/shipyard-*` **exakte** Versionen, kein
-`"*"` und kein `"^"`. Shipyard 0.8.x setzt Astro 6 voraus. Löst npm die
-Versionen neu auf, zieht es 0.8.x, und der Build bricht ab mit:
+`"*"` und kein `"^"`. Jede Shipyard-Minor-Version setzt eine bestimmte
+Astro-Major-Version voraus (0.9.x: Astro 7). Löst npm die Versionen neu auf,
+passen Shipyard und Astro nicht mehr zusammen, und der Build bricht ab.
 
-```
-Rollup failed to resolve import "virtual:shipyard/css"
-```
-
-Ein Update auf Shipyard 0.8 ist ein bewusster Schritt zusammen mit Astro 6,
-kein Nebeneffekt eines `npm install`.
+Ein Shipyard-Update ist ein bewusster Schritt zusammen mit Astro, kein
+Nebeneffekt eines `npm install`.
 
 ### 2. `npm ci`, nicht `npm install` - auch im Dockerfile
 
@@ -350,8 +347,9 @@ veröffentlichen, was der Login schützt.
 - Admonitions: `:::note`, `:::tip`, `:::info`, `:::warning`, `:::danger`.
   Docusaurus' `:::caution` gibt es nicht - dafür `:::warning` benutzen.
 - Der Titel einer Admonition (`:::warning[Titel]`) funktioniert nur, weil
-  `plugins/remark-admonition-labels.mjs` zwischen `remarkDirective` und
-  `remarkAdmonitions` läuft. Die Reihenfolge in `astro.config.mjs` ist bindend.
+  `plugins/remark-admonition-labels.mjs` nach Shipyards `remarkAdmonitions`
+  läuft. Deshalb steht die Integration `admonitionTitel` in `astro.config.mjs`
+  als letzte in `integrations`.
 
 ## Updates aus der Vorlage holen
 

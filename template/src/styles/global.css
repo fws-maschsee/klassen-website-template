@@ -1,3 +1,9 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@import "tailwindcss";
+
+/* Die Pakete bringen ihre @source-Zeilen selbst mit; `@source` löst keine Paketnamen auf, und zwar still. */
+@import "@levino/shipyard-base";
+@import "@levino/shipyard-blog";
+@import "@levino/shipyard-docs";
+
+@plugin "daisyui";
+@plugin "@tailwindcss/typography";

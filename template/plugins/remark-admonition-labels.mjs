@@ -1,20 +1,33 @@
 import { visit } from 'unist-util-visit'
 
-// remarkAdmonitions aus shipyard liest `node.label`, remark-directive legt den Titel aber als ersten Absatz ab.
+const hatKlasse = (knoten, klasse) => {
+	const klassen = knoten?.data?.hProperties?.className
+	return Array.isArray(klassen) && klassen.includes(klasse)
+}
+
+// Läuft NACH shipyards remarkAdmonitions: das schreibt seit 0.9 immer den Vorgabetitel statt des geschriebenen.
 export const remarkAdmonitionLabels = () => (tree) => {
 	visit(tree, 'containerDirective', (node) => {
-		const [first] = node.children ?? []
-		if (!first || first.type !== 'paragraph' || !first.data?.directiveLabel) {
+		const [ueberschrift, rumpf] = node.children ?? []
+		if (
+			!hatKlasse(ueberschrift, 'admonition-heading') ||
+			!hatKlasse(rumpf, 'admonition-content')
+		) {
 			return
 		}
-		const label = (first.children ?? [])
-			.map((child) => ('value' in child ? child.value : ''))
+		const [erstes] = rumpf.children ?? []
+		if (erstes?.type !== 'paragraph' || !erstes.data?.directiveLabel) {
+			return
+		}
+		const label = (erstes.children ?? [])
+			.map((kind) => ('value' in kind ? kind.value : ''))
 			.join('')
 			.trim()
-		if (label) {
-			node.label = label
+		if (!label) {
+			return
 		}
-		node.children = node.children.slice(1)
+		ueberschrift.children = [{ type: 'text', value: label }]
+		rumpf.children = rumpf.children.slice(1)
 	})
 }
 
