@@ -98,7 +98,7 @@ Der Paketname ist absichtlich generisch (`klassen-website` bzw.
 Lockfiles `.jinja`-Dateien sein, und ein Lehrkraftwechsel würde sie anfassen.
 
 `_skip_if_exists` in `copier.yml` schützt die Lockfiles der Instanz vor
-`copier update`: Dort haben Dependabot und lokale Installationen längst neuere
+`copier update`: Dort haben Renovate und lokale Installationen längst neuere
 Auflösungen eingetragen. Dieselbe Liste schützt
 `deploy/overlays/production/kustomization.yaml` (trägt den gepinnten Image-Tag
 des laufenden Deployments) und die beiden SealedSecrets - ein `copier update`
