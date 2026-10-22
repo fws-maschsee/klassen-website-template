@@ -97,7 +97,9 @@ jobs:
       - uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
+          # Astro 7 verlangt Node >= 22.23.4; ohne check-latest nimmt setup-node das ältere Node aus dem Runner-Image.
           node-version: '22'
+          check-latest: true
 
       - name: Instanz erzeugen
         run: |
@@ -137,7 +139,9 @@ jobs:
       - uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
+          # Astro 7 verlangt Node >= 22.23.4; ohne check-latest nimmt setup-node das ältere Node aus dem Runner-Image.
           node-version: '22'
+          check-latest: true
 
       - name: Instanz erzeugen
         run: |
@@ -165,7 +169,9 @@ jobs:
       - uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
+          # Astro 7 verlangt Node >= 22.23.4; ohne check-latest nimmt setup-node das ältere Node aus dem Runner-Image.
           node-version: '22'
+          check-latest: true
 
       - name: Instanz erzeugen
         run: |
