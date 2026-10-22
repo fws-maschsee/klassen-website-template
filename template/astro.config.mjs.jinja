@@ -1,12 +1,10 @@
+import { fileURLToPath } from 'node:url'
+import { isUnifiedProcessor, unified } from '@astrojs/markdown-remark'
 import node from '@astrojs/node'
-import tailwind from '@astrojs/tailwind'
 import shipyard from '@levino/shipyard-base'
-import {
-	remarkAdmonitions,
-	remarkDirective,
-} from '@levino/shipyard-base/remark'
 import shipyardBlog from '@levino/shipyard-blog'
 import shipyardDocs from '@levino/shipyard-docs'
+import tailwindcss from '@tailwindcss/vite'
 import { defineConfig } from 'astro/config'
 import { remarkAdmonitionLabels } from './plugins/remark-admonition-labels.mjs'
 {% if plausible_script_url %}
@@ -21,6 +19,28 @@ import {
 import { CLASS_NAME, REPO_URL, SITE_URL } from './src/site.config'
 {% endif %}
 
+// Eigene Integration hinter shipyard: shipyard hängt seine remark-Plugins erst in astro:config:setup an.
+const admonitionTitel = {
+	name: 'admonition-titel',
+	hooks: {
+		'astro:config:setup': ({ config, updateConfig }) => {
+			const prozessor = config.markdown.processor
+			const optionen = isUnifiedProcessor(prozessor) ? prozessor.options : {}
+			updateConfig({
+				markdown: {
+					processor: unified({
+						...optionen,
+						remarkPlugins: [
+							...(optionen.remarkPlugins ?? []),
+							remarkAdmonitionLabels,
+						],
+					}),
+				},
+			})
+		},
+	},
+}
+
 export default defineConfig({
 	site: SITE_URL,
 	// SSR, weil ein statischer Build alle Berichte ohne Anmeldung ausliefern würde.
@@ -31,15 +51,13 @@ export default defineConfig({
 	}),
 	// Hinter Express greift der Origin-Check nicht zuverlässig; die Consent-Seite schützen PKCE und das zufällige pending_id.
 	security: { checkOrigin: false },
-	markdown: {
-		// Reihenfolge ist bindend: das Label-Plugin muss zwischen Directive und Admonitions laufen.
-		remarkPlugins: [remarkDirective, remarkAdmonitionLabels, remarkAdmonitions],
-	},
+	// Astro 7 entfernt sonst Leerraum zwischen Inline-Elementen ("Wort<a>Link</a>" klebt zusammen).
+	compressHTML: true,
+	vite: { plugins: [tailwindcss()] },
 	integrations: [
-		tailwind({
-			applyBaseStyles: false,
-		}),
 		shipyard({
+			// Ohne `css` lädt shipyard gar kein Stylesheet, und kein Build meldet es.
+			css: fileURLToPath(new URL('./src/styles/global.css', import.meta.url)),
 			brand: CLASS_NAME,
 			title: CLASS_NAME,
 			tagline: 'Unterlagen und Berichte',
@@ -72,5 +90,7 @@ export default defineConfig({
 			postsPerPage: 20,
 			editUrl: `${REPO_URL}/edit/main/src/content/blog`,
 		}),
+		// Muss nach shipyard stehen, siehe oben.
+		admonitionTitel,
 	],
 })

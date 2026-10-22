@@ -133,7 +133,7 @@ const editingList = listId ? lists.find((l) => l.address === listId) : undefined
     </p>
 
     {notice && (
-      <p class={`not-prose mb-6 rounded p-3 ${notice.kind === 'ok' ? 'bg-success/20' : 'bg-error/20'}`}>
+      <p class={`not-prose mb-6 rounded-sm p-3 ${notice.kind === 'ok' ? 'bg-success/20' : 'bg-error/20'}`}>
         {notice.text}
       </p>
     )}
@@ -219,11 +219,11 @@ const editingList = listId ? lists.find((l) => l.address === listId) : undefined
             </span>
           </label>
 
-          <label class="form-control">
-            <span class="label-text">Erlaubte Absender (ein Muster je Zeile)</span>
-            <textarea class="textarea textarea-bordered font-mono text-sm" name="sender_patterns" rows="4"
+          <label class="grid gap-1">
+            <span class="label">Erlaubte Absender (ein Muster je Zeile)</span>
+            <textarea class="textarea w-full font-mono text-sm" name="sender_patterns" rows="4"
               >{listSenderPatterns(editingList).join('\n')}</textarea>
-            <span class="label-text-alt mt-1 opacity-70">
+            <span class="mt-1 text-xs opacity-70">
               Volle Adresse (<code>anna@example.org</code>) oder ganze Domain
               (<code>*@schule.example</code>). Der Stern steht nur
               ganz vorne. Die Domain muss genau stimmen:
@@ -289,11 +289,11 @@ const editingList = listId ? lists.find((l) => l.address === listId) : undefined
       selbst und schickt Dich hierher zur Zustimmung.
     </p>
     <div class="not-prose mb-3">
-      <label class="label-text" for="mcp-url">Server-URL</label>
+      <label class="label" for="mcp-url">Server-URL</label>
       <div class="flex gap-2 items-center">
         <input
           id="mcp-url"
-          class="input input-bordered font-mono text-sm flex-1"
+          class="input font-mono text-sm flex-1"
           readonly
           value={mcpUrl}
         />
@@ -397,26 +397,26 @@ const editingList = listId ? lists.find((l) => l.address === listId) : undefined
           <input type="hidden" name="action" value="upsert" />
           <input type="hidden" name="id" value={editing?.id ?? ''} />
           <div class="grid grid-cols-2 gap-3">
-            <label class="form-control">
-              <span class="label-text">Vorname</span>
-              <input class="input input-bordered" name="first_name" required value={editing?.first_name ?? ''} />
+            <label class="grid gap-1">
+              <span class="label">Vorname</span>
+              <input class="input w-full" name="first_name" required value={editing?.first_name ?? ''} />
             </label>
-            <label class="form-control">
-              <span class="label-text">Nachname</span>
-              <input class="input input-bordered" name="last_name" required value={editing?.last_name ?? ''} />
+            <label class="grid gap-1">
+              <span class="label">Nachname</span>
+              <input class="input w-full" name="last_name" required value={editing?.last_name ?? ''} />
             </label>
           </div>
-          <label class="form-control">
-            <span class="label-text">E-Mail</span>
-            <input class="input input-bordered" type="email" name="email" value={editing?.email ?? ''} />
+          <label class="grid gap-1">
+            <span class="label">E-Mail</span>
+            <input class="input w-full" type="email" name="email" value={editing?.email ?? ''} />
           </label>
           <p class="text-sm opacity-70">
             Mehr als Name und E-Mail wird bewusst nicht gespeichert — keine
             Anrede, keine Telefonnummer, keine Notizen. Für den Versand
             reicht das, und was nicht da ist, kann auch nicht abhandenkommen.
           </p>
-          <fieldset class="border rounded p-3">
-            <legend class="label-text px-1">Gruppen</legend>
+          <fieldset class="border rounded-sm p-3">
+            <legend class="px-1 text-sm font-semibold">Gruppen</legend>
             {groups.map((g) => (
               <label class="flex items-center gap-2">
                 <input type="checkbox" class="checkbox checkbox-sm" name="groups" value={g.key}

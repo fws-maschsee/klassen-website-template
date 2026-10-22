@@ -72,6 +72,14 @@
 				"dockerfile"
 			],
 			"pinDigests": true
+		},
+		{
+			"description": "Astro und alle @astrojs/*-Pakete gemeinsam aktualisieren: getrennte Major-PRs scheitern an den Peer-Abhängigkeiten.",
+			"matchPackageNames": [
+				"astro",
+				"@astrojs/**"
+			],
+			"groupName": "astro"
 		}
 	],
 	"vulnerabilityAlerts": {

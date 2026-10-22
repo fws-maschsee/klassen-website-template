@@ -80,11 +80,11 @@ haben.
 
 ## Der Stack, den die Vorlage festhält
 
-- **Astro 5** im SSR-Modus über `@astrojs/node` im Modus `middleware`; der
+- **Astro 7** im SSR-Modus über `@astrojs/node` im Modus `middleware`; der
   Astro-Server hängt in einem Express-Prozess (`server.ts`), damit MCP-Endpunkt,
   OAuth-Routen und Queue-Worker daneben laufen können
 - **Shipyard**: `@levino/shipyard-base`, `-docs`, `-blog`
-- **Tailwind 3 + daisyUI 4**
+- **Tailwind 4 + daisyUI 5**
 - **Anmeldung** über OpenID Connect gegen ein zentrales ZITADEL; Zugang hat, wer
   im ZITADEL-**Projekt der Klasse** die Rolle `mitglied` hat
 - **SQLite** (better-sqlite3) auf einem persistenten Volume, Schema über
@@ -128,16 +128,17 @@ passiert. Eine Vorlage, die sie nicht verhindert, wäre wertlos.
 
 ### 1. Shipyard-Versionen sind gepinnt
 
-`"@levino/shipyard-*": "*"` in `package.json` zieht Shipyard 0.8.x, das Astro 6
-voraussetzt. Der Build bricht dann ab mit:
+`"@levino/shipyard-*": "*"` in `package.json` zieht die neueste Shipyard-Version,
+und jede Shipyard-Minor-Version setzt eine bestimmte Astro-Major-Version voraus
+(0.9.x: Astro 7). Passen beide nicht zusammen, bricht der Build ab, etwa mit:
 
 ```
 Rollup failed to resolve import "virtual:shipyard/css"
 ```
 
-Die Vorlage pinnt exakt auf 0.6.1 / 0.6.1 / 0.6.2 und begründet das direkt in
-`package.json`. Ein Wechsel auf Shipyard 0.8 ist ein bewusster Schritt zusammen
-mit Astro 6 - hier in der Vorlage, dann per `copier update` bei allen Klassen.
+Die Vorlage pinnt exakt auf 0.9.4. Ein Wechsel auf eine neue Shipyard-Minor-Version
+ist ein bewusster Schritt zusammen mit Astro - hier in der Vorlage, dann per
+`copier update` bei allen Klassen.
 
 ### 2. `npm ci --omit=dev` in der Runner-Stufe, mit mitkopierter Lockfile
 
@@ -285,11 +286,10 @@ die erzeugte Seite ein: `plausible_script_url` ist standardmäßig leer.
 Diese Dinge stehen fest, weil eine Wahlmöglichkeit hier nur Varianten erzeugen
 würde, die niemand testet:
 
-- **Astro 5 + `@astrojs/node` standalone, SSR.** Kein statischer Modus, kein
+- **Astro 7 + `@astrojs/node` als Middleware, SSR.** Kein statischer Modus, kein
   anderer Adapter.
-- **Shipyard 0.6.x, exakt gepinnt.** Siehe Falle 1.
-- **Tailwind 3 + daisyUI 4.** Der Sprung auf Tailwind 4 kommt zusammen mit
-  Shipyard 0.8 und Astro 6, für alle Klassen gleichzeitig.
+- **Shipyard 0.9.x, exakt gepinnt.** Siehe Falle 1.
+- **Tailwind 4 + daisyUI 5**, eingebunden über `src/styles/global.css`.
 - **Node 22 (alpine), Port 3000, Registry `ghcr.io`.**
 - **Biome** als Formatter und Linter, Version an den Workflow gekoppelt.
 - **Routen `/docs` und `/blog`**, Beschriftungen "Unterlagen" und "Berichte".
