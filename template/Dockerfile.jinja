@@ -1,4 +1,4 @@
-FROM node:22-alpine AS builder
+FROM node:22-alpine@sha256:fe4f6d74e20370acb04ad889077d14d0f64a9c8ea6a42bc60cddf1e844699914 AS builder
 
 # better-sqlite3 hat für musl nicht zu jeder Node-Version ein Prebuild.
 RUN apk add --no-cache python3 make g++
@@ -13,7 +13,7 @@ COPY . .
 
 RUN npm run build
 
-FROM node:22-alpine AS prod-deps
+FROM node:22-alpine@sha256:fe4f6d74e20370acb04ad889077d14d0f64a9c8ea6a42bc60cddf1e844699914 AS prod-deps
 
 RUN apk add --no-cache python3 make g++
 
@@ -23,7 +23,7 @@ COPY package.json package-lock.json ./
 
 RUN npm ci --omit=dev && npm cache clean --force
 
-FROM node:22-alpine AS runner
+FROM node:22-alpine@sha256:fe4f6d74e20370acb04ad889077d14d0f64a9c8ea6a42bc60cddf1e844699914 AS runner
 
 RUN apk add --no-cache ca-certificates
 
