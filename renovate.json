@@ -57,6 +57,13 @@
 				"npm"
 			],
 			"minimumReleaseAge": "3 days"
+		},
+		{
+			"description": "Biome-Updates einzeln, damit neue Regeln nicht alle anderen Updates blockieren.",
+			"matchPackageNames": [
+				"@biomejs/biome"
+			],
+			"groupName": "biome"
 		}
 	],
 	"vulnerabilityAlerts": {

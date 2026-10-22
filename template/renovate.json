@@ -2,6 +2,9 @@
 	"$schema": "https://docs.renovatebot.com/renovate-schema.json",
 	"description": "Hält npm-Pakete (auch email-worker), Node-Basis-Image (per Digest), Devcontainer und Actions dieser Klasse aktuell; mergt selbst, sobald die Checks grün sind (keine Majors).",
 	"extends": ["config:recommended", ":disableDependencyDashboard"],
+	"vulnerabilityAlerts": {
+		"minimumReleaseAge": null
+	},
 	"timezone": "Europe/Berlin",
 	"labels": ["dependencies"],
 	"osvVulnerabilityAlerts": true,
@@ -31,6 +34,16 @@
 			"description": "Eigenes App-Image setzt der Deploy-Job (Tag auf dem Branch production), nicht Renovate.",
 			"matchPackageNames": ["ghcr.io/fws-maschsee/**"],
 			"enabled": false
+		},
+		{
+			"description": "Lieferketten-Schutz: Actions- und npm-Releases erst nach 3 Tagen übernehmen (kompromittierte Releases werden meist in Stunden bis Tagen zurückgezogen). Basis-Image-Digests und Sicherheitsfixes kommen sofort.",
+			"matchManagers": ["github-actions", "npm"],
+			"minimumReleaseAge": "3 days"
+		},
+		{
+			"description": "Biome-Updates einzeln, damit neue Regeln nicht alle anderen Updates blockieren.",
+			"matchPackageNames": ["@biomejs/biome"],
+			"groupName": "biome"
 		}
 	]
 }
